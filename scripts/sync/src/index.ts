@@ -48,6 +48,7 @@ const args = new Set(process.argv.slice(2));
 const mode = args.has("--full") ? "full" : "incremental";
 const dryRun = args.has("--dry-run");
 const withImages = !args.has("--no-images");
+const MAX_D1_SQL_CHARS = Number(process.env.D1_MAX_SQL_CHARS ?? "50000");
 
 const tcgdexBase = ((process.env.TCGDEX_BASE_URL ?? "").trim() || "https://api.tcgdex.net/v2").replace(
   /\/+$/,
@@ -117,9 +118,31 @@ const runCommand = (cmd: string, cmdArgs: string[], quiet = false): Promise<stri
     child.on("error", reject);
     child.on("close", (code) => {
       if (code === 0) resolve(stdout);
-      else reject(new Error(`${cmd} ${cmdArgs.join(" ")} failed: ${stderr || stdout}`));
+      else {
+        const redactedArgs: string[] = [];
+        for (let i = 0; i < cmdArgs.length; i += 1) {
+          const arg = cmdArgs[i];
+          if (arg === "--command") {
+            redactedArgs.push("--command", "<redacted-sql>");
+            i += 1;
+            continue;
+          }
+          redactedArgs.push(arg);
+        }
+        const details = (stderr || stdout || "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 2000);
+        reject(new Error(`${cmd} ${redactedArgs.join(" ")} failed: ${details}`));
+      }
     });
   });
+};
+
+const summarizeError = (error: unknown, maxLength = 1200): string => {
+  const raw =
+    error instanceof Error ? `${error.name}: ${error.message}` : String(error ?? "unknown error");
+  return raw.replace(/\s+/g, " ").trim().slice(0, maxLength);
 };
 
 const extractJson = (output: string): unknown => {
@@ -286,24 +309,58 @@ const loadExistingHashes = async (lang: Lang): Promise<Map<string, string>> => {
   return new Map(rows.map((x) => [x.id, x.source_hash]));
 };
 
-const upsertCards = async (lang: Lang, cards: CardDetail[]): Promise<void> => {
-  const cardChunks = chunk(cards, 50);
-  for (const part of cardChunks) {
-    const statements: string[] = ["BEGIN;"];
+const runSqlBlocksInBatches = async (
+  blocks: Array<{ id?: string; sql: string }>
+): Promise<void> => {
+  const flush = async (batch: string[]) => {
+    if (batch.length === 0) return;
+    await d1Execute(`BEGIN;\n${batch.join("\n")}\nCOMMIT;`);
+  };
 
-    for (const card of part) {
-      const id = card.id;
-      const setId = card.set?.id ?? null;
-      const setName = card.set?.name ?? null;
-      const hp = card.hp ? Number(card.hp) : null;
-      const sourceHash = sha1(card);
-      const payload = stableStringify(card);
+  let pending: string[] = [];
+  let currentLength = "BEGIN;\nCOMMIT;".length;
 
-      statements.push(
-        `DELETE FROM card_types WHERE lang = ${sqlString(lang)} AND card_id = ${sqlString(id)};`
+  for (const block of blocks) {
+    const sql = block.sql.trim();
+    const blockLength = sql.length + 1;
+
+    if (blockLength > MAX_D1_SQL_CHARS) {
+      throw new Error(
+        `卡牌写入 SQL 过长（lang block: ${block.id ?? "unknown"}，长度 ${blockLength}，上限 ${MAX_D1_SQL_CHARS}）`
       );
+    }
 
-      statements.push(`
+    if (currentLength + blockLength > MAX_D1_SQL_CHARS && pending.length > 0) {
+      await flush(pending);
+      pending = [];
+      currentLength = "BEGIN;\nCOMMIT;".length;
+    }
+
+    pending.push(sql);
+    currentLength += blockLength;
+  }
+
+  await flush(pending);
+};
+
+const upsertCards = async (lang: Lang, cards: CardDetail[]): Promise<void> => {
+  const blocks: Array<{ id: string; sql: string }> = [];
+
+  for (const card of cards) {
+    const id = card.id;
+    const setId = card.set?.id ?? null;
+    const setName = card.set?.name ?? null;
+    const hp = card.hp ? Number(card.hp) : null;
+    const sourceHash = sha1(card);
+    const payload = stableStringify(card);
+
+    const statements: string[] = [];
+
+    statements.push(
+      `DELETE FROM card_types WHERE lang = ${sqlString(lang)} AND card_id = ${sqlString(id)};`
+    );
+
+    statements.push(`
 INSERT OR REPLACE INTO cards (
   lang, id, local_id, name, category, rarity, set_id, set_name, illustrator, hp, image_base, payload, source_hash, updated_at
 ) VALUES (
@@ -322,27 +379,29 @@ INSERT OR REPLACE INTO cards (
   ${sqlString(sourceHash)},
   CURRENT_TIMESTAMP
 );
-      `.trim());
+    `.trim());
 
-      statements.push(`
+    statements.push(`
 INSERT OR REPLACE INTO source_hashes(lang, id, source_hash, payload_updated_at)
 VALUES(${sqlString(lang)}, ${sqlString(id)}, ${sqlString(sourceHash)}, CURRENT_TIMESTAMP);
-      `.trim());
+    `.trim());
 
-      for (const type of card.types ?? []) {
-        statements.push(
-          `INSERT OR REPLACE INTO card_types(lang, card_id, type) VALUES(${sqlString(lang)}, ${sqlString(
-            id
-          )}, ${sqlString(type)});`
-        );
-      }
+    for (const type of card.types ?? []) {
+      statements.push(
+        `INSERT OR REPLACE INTO card_types(lang, card_id, type) VALUES(${sqlString(lang)}, ${sqlString(
+          id
+        )}, ${sqlString(type)});`
+      );
     }
 
-    statements.push("COMMIT;");
+    blocks.push({
+      id: `${lang}/${id}`,
+      sql: statements.join("\n")
+    });
+  }
 
-    if (!dryRun) {
-      await d1Execute(statements.join("\n"));
-    }
+  if (!dryRun) {
+    await runSqlBlocksInBatches(blocks);
   }
 };
 
@@ -472,10 +531,11 @@ main().catch(async (error) => {
   console.error("同步失败:", error);
   try {
     if (!dryRun) {
+      const errorSummary = summarizeError(error, 900);
       await d1Execute(`
         UPDATE sync_runs
         SET status = 'failed', summary_json = ${sqlString(
-          JSON.stringify({ error: String((error as Error).message ?? error) })
+          JSON.stringify({ error: errorSummary })
         )}, finished_at = CURRENT_TIMESTAMP
         WHERE id = (SELECT MAX(id) FROM sync_runs);
       `);

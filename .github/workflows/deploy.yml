@@ -74,12 +74,21 @@ jobs:
             echo "::error::缺少 CF_PAGES_PROJECT_NAME secret。"
             exit 1
           fi
-          EXISTS=$(wrangler pages project list --json | node -e 'const fs=require("fs");const n=process.env.CF_PAGES_PROJECT_NAME;const arr=JSON.parse(fs.readFileSync(0,"utf8"));process.stdout.write(arr.some(x=>x.name===n)?"1":"0")')
-          if [ "$EXISTS" = "1" ]; then
-            echo "Pages project ${CF_PAGES_PROJECT_NAME} 已存在"
+          echo "确保 Pages project ${CF_PAGES_PROJECT_NAME} 存在（幂等）"
+          set +e
+          CREATE_OUTPUT=$(wrangler pages project create "${CF_PAGES_PROJECT_NAME}" --production-branch main 2>&1)
+          CREATE_EXIT=$?
+          set -e
+          if [ $CREATE_EXIT -eq 0 ]; then
+            echo "Pages project ${CF_PAGES_PROJECT_NAME} 创建成功"
           else
-            echo "Pages project ${CF_PAGES_PROJECT_NAME} 不存在，开始创建"
-            wrangler pages project create "${CF_PAGES_PROJECT_NAME}" --production-branch main
+            echo "$CREATE_OUTPUT"
+            if echo "$CREATE_OUTPUT" | grep -qE "already exists|8000002"; then
+              echo "Pages project ${CF_PAGES_PROJECT_NAME} 已存在，继续部署"
+            else
+              echo "::error::创建 Pages project 失败"
+              exit $CREATE_EXIT
+            fi
           fi
 
       - name: Deploy Worker

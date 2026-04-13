@@ -1,0 +1,8 @@
+apis:
+  main:
+    root: ./openapi/openapi.yaml
+
+rules:
+  no-unused-components: error
+  operation-2xx-response: error
+  no-ambiguous-paths: error

@@ -1,0 +1,23 @@
+name = "ptcg-dex-api"
+main = "src/index.ts"
+compatibility_date = "2026-04-13"
+
+[vars]
+R2_PUBLIC_BASE_URL = ""
+CACHE_TTL_SECONDS = "600"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ptcg-dex-db"
+database_id = "__SET_IN_CLOUDFLARE__"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "__SET_IN_CLOUDFLARE__"
+
+[[r2_buckets]]
+binding = "CARD_IMAGES"
+bucket_name = "ptcg-dex-card-images"
+
+[observability.logs]
+enabled = true

@@ -1,0 +1,28 @@
+{
+  "name": "ptcg-dex",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "scripts/*"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace @ptcg-dex/web run dev",
+    "dev:worker": "npm --workspace @ptcg-dex/worker run dev",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "sync": "npm --workspace @ptcg-dex/sync run sync",
+    "openapi:lint": "npm --workspace @ptcg-dex/worker run openapi:lint",
+    "api:drift": "node scripts/tools/check-api-drift.mjs"
+  },
+  "devDependencies": {
+    "@redocly/cli": "^1.26.0",
+    "typescript": "^5.8.3",
+    "js-yaml": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

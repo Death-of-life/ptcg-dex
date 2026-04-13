@@ -1,0 +1,380 @@
+openapi: 3.1.0
+info:
+  title: TCGdex Atlas API
+  version: 1.0.0
+  description: |
+    TCGdex 图鉴站 API（Cloudflare Workers）。
+    支持语言：`en`、`ja`、`zh-tw`。
+    本文档为唯一事实源，Swagger UI 与 ReDoc 均由此生成。
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+servers:
+  - url: https://ptcg-dex-api.example.workers.dev
+    description: 生产环境（示例）
+  - url: http://127.0.0.1:8787
+    description: 本地开发
+
+tags:
+  - name: Health
+    description: 健康检查与运行状态
+  - name: Cards
+    description: 卡牌查询与详情
+  - name: Filters
+    description: 语言独立筛选维度
+
+security: []
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      operationId: getHealth
+      summary: 健康检查
+      responses:
+        "200":
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  service:
+                    type: string
+                    example: ptcg-dex-api
+                  langs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Language"
+                  timestamp:
+                    type: string
+                    format: date-time
+        "500":
+          description: 服务异常
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: 触发限流
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/{lang}/cards:
+    get:
+      tags: [Cards]
+      operationId: listCards
+      summary: 查询卡牌列表
+      description: 组合筛选、排序、分页查询。
+      parameters:
+        - $ref: "#/components/parameters/Lang"
+        - name: name
+          in: query
+          description: 名称关键词（模糊匹配）
+          schema:
+            type: string
+        - name: setId
+          in: query
+          description: 系列 ID（精确匹配）
+          schema:
+            type: string
+        - name: rarity
+          in: query
+          description: 稀有度（精确匹配）
+          schema:
+            type: string
+        - name: type
+          in: query
+          description: 属性（精确匹配）
+          schema:
+            type: string
+        - name: hpMin
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+        - name: hpMax
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 24
+        - name: sortBy
+          in: query
+          schema:
+            type: string
+            enum: [name, hp, updatedAt]
+            default: name
+        - name: sortOrder
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+      responses:
+        "200":
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CardListResponse"
+        "400":
+          description: 参数错误或语言不支持
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalidLanguage:
+                  summary: 语言错误
+                  value:
+                    status: 400
+                    title: Unsupported language
+                    detail: "Allowed values: en, ja, zh-tw"
+                    lang: jp
+
+  /v1/{lang}/cards/{id}:
+    get:
+      tags: [Cards]
+      operationId: getCardDetail
+      summary: 获取卡牌详情
+      parameters:
+        - $ref: "#/components/parameters/Lang"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CardDetailResponse"
+        "404":
+          description: 卡牌不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/{lang}/filters:
+    get:
+      tags: [Filters]
+      operationId: getFilters
+      summary: 获取语言独立过滤器
+      parameters:
+        - $ref: "#/components/parameters/Lang"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FiltersResponse"
+        "400":
+          description: 语言不支持
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  parameters:
+    Lang:
+      name: lang
+      in: path
+      required: true
+      description: 语言代码
+      schema:
+        $ref: "#/components/schemas/Language"
+
+  schemas:
+    Language:
+      type: string
+      enum: [en, ja, zh-tw]
+
+    ImageVariants:
+      type: object
+      properties:
+        lowWebp:
+          type: string
+          format: uri
+        highWebp:
+          type: string
+          format: uri
+        lowPng:
+          type: string
+          format: uri
+        highPng:
+          type: string
+          format: uri
+
+    CardSummary:
+      type: object
+      required: [lang, id, name, types]
+      properties:
+        lang:
+          $ref: "#/components/schemas/Language"
+        id:
+          type: string
+        localId:
+          type: [string, "null"]
+        name:
+          type: string
+        category:
+          type: [string, "null"]
+        rarity:
+          type: [string, "null"]
+        setId:
+          type: [string, "null"]
+        setName:
+          type: [string, "null"]
+        illustrator:
+          type: [string, "null"]
+        hp:
+          type: [integer, "null"]
+        types:
+          type: array
+          items:
+            type: string
+        imageVariants:
+          $ref: "#/components/schemas/ImageVariants"
+
+    CardListResponse:
+      type: object
+      required: [lang, items, total, page, pageSize, cached]
+      properties:
+        lang:
+          $ref: "#/components/schemas/Language"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CardSummary"
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        cached:
+          type: boolean
+
+    CardDetail:
+      type: object
+      required: [lang, id, name]
+      properties:
+        lang:
+          $ref: "#/components/schemas/Language"
+        id:
+          type: string
+        name:
+          type: string
+        localId:
+          type: string
+        category:
+          type: string
+        rarity:
+          type: string
+        hp:
+          type: integer
+        types:
+          type: array
+          items:
+            type: string
+        set:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+        image:
+          type: string
+          format: uri
+        imageVariants:
+          $ref: "#/components/schemas/ImageVariants"
+      additionalProperties: true
+
+    CardDetailResponse:
+      type: object
+      required: [card, cached]
+      properties:
+        cached:
+          type: boolean
+        card:
+          $ref: "#/components/schemas/CardDetail"
+
+    FiltersResponse:
+      type: object
+      required: [lang, types, rarities, illustrators, sets, hp]
+      properties:
+        lang:
+          $ref: "#/components/schemas/Language"
+        types:
+          type: array
+          items:
+            type: string
+        rarities:
+          type: array
+          items:
+            type: string
+        illustrators:
+          type: array
+          items:
+            type: string
+        sets:
+          type: array
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+        hp:
+          type: array
+          items:
+            type: integer
+        cached:
+          type: boolean
+
+    ErrorResponse:
+      type: object
+      required: [status, title, detail]
+      properties:
+        status:
+          type: integer
+        title:
+          type: string
+        detail:
+          type: string
+        lang:
+          type: string
+
+x-api-governance:
+  rate-limit:
+    policy: "Cloudflare WAF / Rate Limiting rules 推荐在生产环境开启"
+  caching:
+    strategy: "Worker KV 缓存 cards/filters，TTL 默认 600 秒"
+  versioning:
+    policy: "路径版本化：/v1；后续不兼容变更走 /v2"

@@ -70,13 +70,13 @@ jobs:
 
       - name: Run incremental sync (scheduled)
         if: github.event_name == 'schedule'
-        run: npm run sync
+        run: npm --workspace @ptcg-dex/sync run sync
 
       - name: Run manual sync
         if: github.event_name == 'workflow_dispatch'
         run: |
           if [ "${{ github.event.inputs.mode }}" = "full" ]; then
-            npm run sync -- --full
+            npm --workspace @ptcg-dex/sync run sync -- --full
           else
-            npm run sync
+            npm --workspace @ptcg-dex/sync run sync
           fi

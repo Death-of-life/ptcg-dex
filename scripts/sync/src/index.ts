@@ -49,7 +49,10 @@ const mode = args.has("--full") ? "full" : "incremental";
 const dryRun = args.has("--dry-run");
 const withImages = !args.has("--no-images");
 
-const tcgdexBase = process.env.TCGDEX_BASE_URL ?? "https://api.tcgdex.net/v2";
+const tcgdexBase = ((process.env.TCGDEX_BASE_URL ?? "").trim() || "https://api.tcgdex.net/v2").replace(
+  /\/+$/,
+  ""
+);
 const d1DatabaseName = process.env.D1_DATABASE_NAME;
 const kvNamespaceId = process.env.KV_NAMESPACE_ID;
 const r2BucketName = process.env.R2_BUCKET_NAME;

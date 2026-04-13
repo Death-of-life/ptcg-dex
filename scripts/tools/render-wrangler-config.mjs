@@ -19,11 +19,14 @@ if (missing.length > 0) {
 }
 
 const rendered = input
+  .replaceAll("__CLOUDFLARE_ACCOUNT_ID__", process.env.CLOUDFLARE_ACCOUNT_ID ?? "")
   .replaceAll("__D1_DATABASE_NAME__", process.env.D1_DATABASE_NAME)
   .replaceAll("__D1_DATABASE_ID__", process.env.D1_DATABASE_ID)
   .replaceAll("__KV_NAMESPACE_ID__", process.env.KV_NAMESPACE_ID)
   .replaceAll("__R2_BUCKET_NAME__", process.env.R2_BUCKET_NAME)
   .replaceAll("__R2_PUBLIC_BASE_URL__", process.env.CF_R2_PUBLIC_BASE_URL);
 
-writeFileSync(configPath, rendered);
+const normalized = rendered.replace(/^account_id = ""\n/m, "");
+
+writeFileSync(configPath, normalized);
 console.log("wrangler.toml 已根据 Secrets 渲染完成");

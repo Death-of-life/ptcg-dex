@@ -22,6 +22,9 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
+      CLOUDFLARE_EMAIL: ${{ secrets.CLOUDFLARE_EMAIL }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       D1_DATABASE_NAME: ${{ secrets.D1_DATABASE_NAME }}
       D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
       KV_NAMESPACE_ID: ${{ secrets.KV_NAMESPACE_ID }}
@@ -42,6 +45,17 @@ jobs:
 
       - name: Install latest Wrangler CLI
         run: npm install -g wrangler@latest
+
+      - name: Verify Cloudflare auth
+        run: |
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] && { [ -z "${CLOUDFLARE_API_KEY:-}" ] || [ -z "${CLOUDFLARE_EMAIL:-}" ]; }; then
+            echo "::error::缺少 Cloudflare 鉴权。请配置 CLOUDFLARE_API_TOKEN，或配置 CLOUDFLARE_API_KEY + CLOUDFLARE_EMAIL。"
+            exit 1
+          fi
+          if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "::warning::CLOUDFLARE_ACCOUNT_ID 未设置。某些 token 会在 /memberships 校验失败（9106）。"
+          fi
+          wrangler whoami || (echo "::error::Cloudflare 鉴权失败。请检查 Token 或 Global API Key 配置。"; exit 1)
 
       - name: Render wrangler.toml from secrets
         run: npm run wrangler:render

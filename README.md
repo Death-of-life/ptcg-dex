@@ -72,7 +72,10 @@ npm run dev:web
 
 以下 Secret 为必需：
 
-- `CLOUDFLARE_API_TOKEN`: Cloudflare 全局 Token（后续建议拆最小权限）
+- 鉴权二选一：
+  - `CLOUDFLARE_API_TOKEN`: 推荐，Cloudflare API Token（Account 级）
+  - 或 `CLOUDFLARE_API_KEY` + `CLOUDFLARE_EMAIL`: Global API Key 模式
+- `CLOUDFLARE_ACCOUNT_ID`: Cloudflare 账号 ID（强烈建议配置；可避免 wrangler 在 `/memberships` 鉴权 9106）
 - `CF_R2_PUBLIC_BASE_URL`: R2 对外加速域名，例如 `https://img.example.com`
 - `D1_DATABASE_NAME`: D1 数据库名（如 `ptcg-dex-db`）
 - `D1_DATABASE_ID`: D1 数据库 ID（Cloudflare 控制台可查）
@@ -172,3 +175,17 @@ npm run api:drift
 - D1: Edit
 - R2: Edit
 - Pages: Edit
+
+## CI 鉴权常见问题（9106）
+
+若 Actions 日志出现：
+
+- `A request to the Cloudflare API (/memberships) failed`
+- `Authentication failed (status: 400) [code: 9106]`
+
+通常表示 token 不是可用于账号级资源操作的 API Token，或缺少账号定位信息。请确认：
+
+1. 使用 **Account 级 API Token**（不是仅子域/Zone 的 token）
+   - 若改用 Global API Key，请同时提供 `CLOUDFLARE_API_KEY` 与 `CLOUDFLARE_EMAIL`
+2. 权限包含：Workers Scripts/KV/D1/R2/Pages 的 Edit
+3. 配置 `CLOUDFLARE_ACCOUNT_ID`，避免 wrangler 自动探测 memberships 失败

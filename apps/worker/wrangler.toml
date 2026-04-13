@@ -1,6 +1,7 @@
 name = "ptcg-dex-api"
 main = "src/index.ts"
 compatibility_date = "2026-04-13"
+account_id = "__CLOUDFLARE_ACCOUNT_ID__"
 
 [vars]
 R2_PUBLIC_BASE_URL = "__R2_PUBLIC_BASE_URL__"

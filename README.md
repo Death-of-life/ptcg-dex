@@ -75,6 +75,7 @@ npm run dev:web
 - 鉴权二选一：
   - `CLOUDFLARE_API_TOKEN`: 推荐，Cloudflare API Token（Account 级）
   - 或 `CLOUDFLARE_API_KEY` + `CLOUDFLARE_EMAIL`: Global API Key 模式
+- 若两组同时存在，CI 会优先使用 `CLOUDFLARE_API_KEY + CLOUDFLARE_EMAIL`，并自动忽略 token
 - `CLOUDFLARE_ACCOUNT_ID`: Cloudflare 账号 ID（强烈建议配置；可避免 wrangler 在 `/memberships` 鉴权 9106）
 - `CF_R2_PUBLIC_BASE_URL`: R2 对外加速域名，例如 `https://img.example.com`
 - `D1_DATABASE_NAME`: D1 数据库名（如 `ptcg-dex-db`）
@@ -82,7 +83,7 @@ npm run dev:web
 - `KV_NAMESPACE_ID`: KV namespace ID
 - `R2_BUCKET_NAME`: R2 bucket 名（如 `ptcg-dex-card-images`）
 - `TCGDEX_BASE_URL`: 可选，默认 `https://api.tcgdex.net/v2`
-- `CF_PAGES_PROJECT_NAME`: Pages 项目名（用于 deploy workflow）
+- `CF_PAGES_PROJECT_NAME`: Pages 项目名（必须是 Pages Project 名称，不是 Worker 名称；deploy 会自动创建缺失项目）
 
 ## 同步流程说明
 

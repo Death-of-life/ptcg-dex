@@ -39,7 +39,12 @@ jobs:
 
       - name: Verify Cloudflare auth
         run: |
-          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] && { [ -z "${CLOUDFLARE_API_KEY:-}" ] || [ -z "${CLOUDFLARE_EMAIL:-}" ]; }; then
+          if [ -n "${CLOUDFLARE_API_KEY:-}" ] && [ -n "${CLOUDFLARE_EMAIL:-}" ]; then
+            echo "Using Global API Key authentication"
+            echo "CLOUDFLARE_API_TOKEN=" >> "$GITHUB_ENV"
+          elif [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "Using API Token authentication"
+          else
             echo "::error::缺少 Cloudflare 鉴权。请配置 CLOUDFLARE_API_TOKEN，或配置 CLOUDFLARE_API_KEY + CLOUDFLARE_EMAIL。"
             exit 1
           fi
@@ -63,8 +68,22 @@ jobs:
       - name: Build web app
         run: npm --workspace @ptcg-dex/web run build
 
+      - name: Ensure Pages project exists
+        run: |
+          if [ -z "${CF_PAGES_PROJECT_NAME:-}" ]; then
+            echo "::error::缺少 CF_PAGES_PROJECT_NAME secret。"
+            exit 1
+          fi
+          EXISTS=$(wrangler pages project list --json | node -e 'const fs=require("fs");const n=process.env.CF_PAGES_PROJECT_NAME;const arr=JSON.parse(fs.readFileSync(0,"utf8"));process.stdout.write(arr.some(x=>x.name===n)?"1":"0")')
+          if [ "$EXISTS" = "1" ]; then
+            echo "Pages project ${CF_PAGES_PROJECT_NAME} 已存在"
+          else
+            echo "Pages project ${CF_PAGES_PROJECT_NAME} 不存在，开始创建"
+            wrangler pages project create "${CF_PAGES_PROJECT_NAME}" --production-branch main
+          fi
+
       - name: Deploy Worker
-        run: wrangler deploy --config apps/worker/wrangler.toml
+        run: wrangler deploy --config apps/worker/wrangler.toml --commit-dirty=true
 
       - name: Deploy Pages static site
-        run: wrangler pages deploy apps/web/out --project-name "${CF_PAGES_PROJECT_NAME}"
+        run: wrangler pages deploy apps/web/out --project-name "${CF_PAGES_PROJECT_NAME}" --commit-dirty=true

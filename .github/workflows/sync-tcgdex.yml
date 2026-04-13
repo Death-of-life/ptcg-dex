@@ -48,7 +48,12 @@ jobs:
 
       - name: Verify Cloudflare auth
         run: |
-          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] && { [ -z "${CLOUDFLARE_API_KEY:-}" ] || [ -z "${CLOUDFLARE_EMAIL:-}" ]; }; then
+          if [ -n "${CLOUDFLARE_API_KEY:-}" ] && [ -n "${CLOUDFLARE_EMAIL:-}" ]; then
+            echo "Using Global API Key authentication"
+            echo "CLOUDFLARE_API_TOKEN=" >> "$GITHUB_ENV"
+          elif [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "Using API Token authentication"
+          else
             echo "::error::缺少 Cloudflare 鉴权。请配置 CLOUDFLARE_API_TOKEN，或配置 CLOUDFLARE_API_KEY + CLOUDFLARE_EMAIL。"
             exit 1
           fi

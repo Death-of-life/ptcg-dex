@@ -11,12 +11,12 @@
     "openapi:lint": "redocly lint ../../openapi/openapi.yaml"
   },
   "dependencies": {
-    "hono": "^4.8.5"
+    "hono": "^4.12.12"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250405.0",
-    "typescript": "^5.8.3",
-    "vitest": "^3.1.2",
-    "wrangler": "^4.10.0"
+    "@cloudflare/workers-types": "^4.20260413.1",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.4",
+    "wrangler": "^4.81.1"
   }
 }

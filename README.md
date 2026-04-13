@@ -24,6 +24,11 @@ Pages (Next.js Web)
 
 ## 快速开始
 
+前置版本要求：
+
+- Node.js 24+
+- npm 11+
+
 ### 1) 安装依赖
 
 ```bash
@@ -37,11 +42,15 @@ npm ci
 3. 创建 R2 bucket：`ptcg-dex-card-images`
 4. 配置 R2 公网域名（CDN）
 5. 创建 Worker 与 Pages 项目
-6. 把资源 ID/名称写入 `apps/worker/wrangler.toml`
+6. `apps/worker/wrangler.toml` 使用占位符模板，不要提交真实 ID；部署时由 GitHub Secrets 自动渲染
 
 ### 3) 迁移数据库
 
 ```bash
+# 先把占位符渲染为本地环境变量值（可选）
+# D1_DATABASE_NAME/D1_DATABASE_ID/KV_NAMESPACE_ID/R2_BUCKET_NAME/CF_R2_PUBLIC_BASE_URL
+npm run wrangler:render
+
 npx wrangler d1 migrations apply ptcg-dex-db --local --config apps/worker/wrangler.toml
 # 生产：
 # npx wrangler d1 migrations apply ptcg-dex-db --remote --config apps/worker/wrangler.toml
@@ -64,9 +73,9 @@ npm run dev:web
 以下 Secret 为必需：
 
 - `CLOUDFLARE_API_TOKEN`: Cloudflare 全局 Token（后续建议拆最小权限）
-- `CLOUDFLARE_ACCOUNT_ID`: Cloudflare 账号 ID
 - `CF_R2_PUBLIC_BASE_URL`: R2 对外加速域名，例如 `https://img.example.com`
 - `D1_DATABASE_NAME`: D1 数据库名（如 `ptcg-dex-db`）
+- `D1_DATABASE_ID`: D1 数据库 ID（Cloudflare 控制台可查）
 - `KV_NAMESPACE_ID`: KV namespace ID
 - `R2_BUCKET_NAME`: R2 bucket 名（如 `ptcg-dex-card-images`）
 - `TCGDEX_BASE_URL`: 可选，默认 `https://api.tcgdex.net/v2`
@@ -103,10 +112,11 @@ npm run dev:web
 `deploy.yml` 在 `main` 分支 push 或手动触发时执行：
 
 1. OpenAPI lint
-2. API 路由漂移检查（OpenAPI vs Worker 路由）
-3. 构建 Web
-4. 部署 Worker
-5. 部署 Pages（静态导出目录 `apps/web/out`）
+2. 渲染 `wrangler.toml`（从 Secrets 注入 D1/KV/R2/域名）
+3. API 路由漂移检查（OpenAPI vs Worker 路由）
+4. 构建 Web
+5. 部署 Worker
+6. 部署 Pages（静态导出目录 `apps/web/out`）
 
 ## API 文档入口
 

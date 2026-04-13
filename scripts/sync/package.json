@@ -8,9 +8,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "tsx": "^4.19.3"
+    "tsx": "^4.21.0"
   },
   "devDependencies": {
-    "typescript": "^5.8.3"
+    "typescript": "^6.0.2"
   }
 }

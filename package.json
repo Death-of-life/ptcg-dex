@@ -15,14 +15,16 @@
     "test": "npm run test --workspaces --if-present",
     "sync": "npm --workspace @ptcg-dex/sync run sync",
     "openapi:lint": "npm --workspace @ptcg-dex/worker run openapi:lint",
-    "api:drift": "node scripts/tools/check-api-drift.mjs"
+    "api:drift": "node scripts/tools/check-api-drift.mjs",
+    "wrangler:render": "node scripts/tools/render-wrangler-config.mjs"
   },
   "devDependencies": {
-    "@redocly/cli": "^1.26.0",
-    "typescript": "^5.8.3",
-    "js-yaml": "^4.1.0"
+    "@redocly/cli": "^2.26.0",
+    "typescript": "^6.0.2",
+    "js-yaml": "^4.1.1"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24",
+    "npm": ">=11"
   }
 }

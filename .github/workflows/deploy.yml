@@ -8,19 +8,34 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      D1_DATABASE_NAME: ${{ secrets.D1_DATABASE_NAME }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      KV_NAMESPACE_ID: ${{ secrets.KV_NAMESPACE_ID }}
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+      CF_R2_PUBLIC_BASE_URL: ${{ secrets.CF_R2_PUBLIC_BASE_URL }}
+      CF_PAGES_PROJECT_NAME: ${{ secrets.CF_PAGES_PROJECT_NAME }}
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Install latest Wrangler CLI
+        run: npm install -g wrangler@latest
+
+      - name: Render wrangler.toml from secrets
+        run: npm run wrangler:render
 
       - name: Lint OpenAPI
         run: npm run openapi:lint
@@ -35,16 +50,7 @@ jobs:
         run: npm --workspace @ptcg-dex/web run build
 
       - name: Deploy Worker
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: apps/worker
-          command: deploy
+        run: wrangler deploy --config apps/worker/wrangler.toml
 
       - name: Deploy Pages static site
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy apps/web/out --project-name ${{ secrets.CF_PAGES_PROJECT_NAME }}
+        run: wrangler pages deploy apps/web/out --project-name "${CF_PAGES_PROJECT_NAME}"

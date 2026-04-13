@@ -3,21 +3,21 @@ main = "src/index.ts"
 compatibility_date = "2026-04-13"
 
 [vars]
-R2_PUBLIC_BASE_URL = ""
+R2_PUBLIC_BASE_URL = "__R2_PUBLIC_BASE_URL__"
 CACHE_TTL_SECONDS = "600"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "ptcg-dex-db"
-database_id = "__SET_IN_CLOUDFLARE__"
+database_name = "__D1_DATABASE_NAME__"
+database_id = "__D1_DATABASE_ID__"
 
 [[kv_namespaces]]
 binding = "CACHE"
-id = "__SET_IN_CLOUDFLARE__"
+id = "__KV_NAMESPACE_ID__"
 
 [[r2_buckets]]
 binding = "CARD_IMAGES"
-bucket_name = "ptcg-dex-card-images"
+bucket_name = "__R2_BUCKET_NAME__"
 
 [observability.logs]
 enabled = true

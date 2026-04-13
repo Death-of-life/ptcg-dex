@@ -237,6 +237,37 @@ const parallelMap = async <T, R>(
   return output;
 };
 
+const executeStatementsInChunks = async (statements: string[]): Promise<void> => {
+  let pending: string[] = [];
+  let currentLength = 0;
+
+  const flush = async () => {
+    if (pending.length === 0) return;
+    await d1Execute(pending.join("\n"));
+    pending = [];
+    currentLength = 0;
+  };
+
+  for (const raw of statements) {
+    const statement = raw.trim();
+    if (!statement) continue;
+    const size = statement.length + 1;
+
+    if (size > MAX_D1_SQL_CHARS) {
+      throw new Error(`SQL 语句长度超过限制（${size} > ${MAX_D1_SQL_CHARS}）`);
+    }
+
+    if (currentLength + size > MAX_D1_SQL_CHARS && pending.length > 0) {
+      await flush();
+    }
+
+    pending.push(statement);
+    currentLength += size;
+  }
+
+  await flush();
+};
+
 const saveFilters = async (lang: Lang): Promise<number> => {
   const [types, rarities, illustrators, hp, sets] = await Promise.all([
     fetchJson<string[]>(`${tcgdexBase}/${lang}/types`),
@@ -285,7 +316,7 @@ const saveFilters = async (lang: Lang): Promise<number> => {
   }
 
   if (!dryRun) {
-    await d1Execute(statements.join("\n"));
+    await executeStatementsInChunks(statements);
     await kvPut(
       `filters:${lang}`,
       JSON.stringify({
@@ -314,11 +345,13 @@ const runSqlBlocksInBatches = async (
 ): Promise<void> => {
   const flush = async (batch: string[]) => {
     if (batch.length === 0) return;
-    await d1Execute(`BEGIN;\n${batch.join("\n")}\nCOMMIT;`);
+    // Cloudflare D1 remote execute does not allow explicit BEGIN/COMMIT.
+    // We send multi-statement SQL blocks directly and control size here.
+    await d1Execute(batch.join("\n"));
   };
 
   let pending: string[] = [];
-  let currentLength = "BEGIN;\nCOMMIT;".length;
+  let currentLength = 0;
 
   for (const block of blocks) {
     const sql = block.sql.trim();
@@ -333,7 +366,7 @@ const runSqlBlocksInBatches = async (
     if (currentLength + blockLength > MAX_D1_SQL_CHARS && pending.length > 0) {
       await flush(pending);
       pending = [];
-      currentLength = "BEGIN;\nCOMMIT;".length;
+      currentLength = 0;
     }
 
     pending.push(sql);

@@ -83,7 +83,7 @@ jobs:
           fi
 
       - name: Deploy Worker
-        run: wrangler deploy --config apps/worker/wrangler.toml --commit-dirty=true
+        run: wrangler deploy --config apps/worker/wrangler.toml
 
       - name: Deploy Pages static site
-        run: wrangler pages deploy apps/web/out --project-name "${CF_PAGES_PROJECT_NAME}" --commit-dirty=true
+        run: wrangler pages deploy apps/web/out --project-name "${CF_PAGES_PROJECT_NAME}"

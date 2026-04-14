@@ -1,6 +1,13 @@
 import { SORTABLE_FIELDS, type SupportedLang } from "./constants";
 import type { CardDetail, CardListItem, FiltersResponse, ListCardsQuery } from "./types";
 
+const normalizePublicBaseUrl = (value: string): string => {
+  const raw = (value ?? "").trim().replace(/\/+$/, "");
+  if (!raw) return "";
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return `https://${raw}`;
+};
+
 const withTypeFilter = (query: ListCardsQuery, where: string[], params: unknown[]) => {
   if (!query.type) return;
   where.push(
@@ -85,11 +92,13 @@ export const listCards = async (
     .bind(...whereParams)
     .first<{ total: number | string }>();
 
+  const normalizedPublicBaseUrl = normalizePublicBaseUrl(r2PublicBaseUrl);
+
   const items: CardListItem[] = (rowsResult.results ?? []).map((row) => {
     const setId = typeof row.setId === "string" ? row.setId : null;
     const id = String(row.id ?? "");
     const imageBase = typeof row.imageBase === "string" ? row.imageBase : null;
-    const root = r2PublicBaseUrl?.replace(/\/$/, "");
+    const root = normalizedPublicBaseUrl;
     const imageVariants = root && setId
       ? {
           lowWebp: `${root}/cards/${lang}/${setId}/${id}/low.webp`,
@@ -155,7 +164,7 @@ export const getCardById = async (
   const parsed = JSON.parse(row.payload) as CardDetail;
   parsed.lang = lang;
 
-  const root = r2PublicBaseUrl?.replace(/\/$/, "");
+  const root = normalizePublicBaseUrl(r2PublicBaseUrl);
   if (root && row.setId) {
     parsed.imageVariants = {
       lowWebp: `${root}/cards/${lang}/${row.setId}/${id}/low.webp`,

@@ -63,10 +63,22 @@ jobs:
           wrangler whoami || (echo "::error::Cloudflare 鉴权失败。请检查 Token 或 Global API Key 配置。"; exit 1)
 
       - name: Render wrangler.toml from secrets
-        run: npm run wrangler:render
+        run: |
+          if ! echo "${CF_R2_PUBLIC_BASE_URL}" | grep -qE '^https?://'; then
+            CF_R2_PUBLIC_BASE_URL="https://${CF_R2_PUBLIC_BASE_URL}"
+          fi
+          export CF_R2_PUBLIC_BASE_URL
+          npm run wrangler:render
 
       - name: Apply D1 migrations
         run: wrangler d1 migrations apply "$D1_DATABASE_NAME" --remote --config apps/worker/wrangler.toml
+
+      - name: Debug R2 objects (before sync)
+        run: |
+          echo "ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID:0:6}..."
+          echo "BUCKET=$R2_BUCKET_NAME"
+          wrangler r2 bucket list
+          wrangler r2 object list "$R2_BUCKET_NAME" --prefix "cards/zh-tw/" --limit 5
 
       - name: Run incremental sync (scheduled)
         if: github.event_name == 'schedule'
@@ -80,3 +92,11 @@ jobs:
           else
             npm --workspace @ptcg-dex/sync run sync
           fi
+
+      - name: Debug R2 objects (after sync)
+        if: always()
+        run: |
+          echo "ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID:0:6}..."
+          echo "BUCKET=$R2_BUCKET_NAME"
+          wrangler r2 bucket list
+          wrangler r2 object list "$R2_BUCKET_NAME" --prefix "cards/zh-tw/" --limit 5

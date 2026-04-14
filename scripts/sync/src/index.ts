@@ -272,6 +272,16 @@ const fetchArrayBuffer = async (url: string): Promise<ArrayBuffer> => {
   return await res.arrayBuffer();
 };
 
+const checkPublicObject = async (url: string): Promise<number> => {
+  const res = await fetch(url, {
+    method: "HEAD",
+    headers: {
+      "user-agent": "ptcg-dex-sync/0.1"
+    }
+  });
+  return res.status;
+};
+
 const chunk = <T>(items: T[], size: number): T[][] => {
   const result: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
@@ -652,6 +662,24 @@ const uploadCardImages = async (
       );
     } finally {
       await rm(verifyFile, { force: true });
+    }
+
+    if (r2PublicBaseUrl) {
+      const publicUrl = `${r2PublicBaseUrl}/${firstUploadedKey}`;
+      try {
+        const status = await checkPublicObject(publicUrl);
+        if (status >= 200 && status < 400) {
+          console.log(`[${lang}] images 公网域名校验成功：${publicUrl} -> ${status}`);
+        } else {
+          console.warn(
+            `[${lang}] images 公网域名校验异常：${publicUrl} -> ${status}（可能是域名未绑定当前桶，或对象尚未可见）`
+          );
+        }
+      } catch (error) {
+        console.warn(
+          `[${lang}] images 公网域名校验失败：${publicUrl} -> ${summarizeError(error, 280)}`
+        );
+      }
     }
   }
 

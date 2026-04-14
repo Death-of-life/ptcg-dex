@@ -93,7 +93,8 @@ const targetLangs = parseLangs();
 const targetRegulationMark = parseRegulationMark();
 const d1DatabaseName = process.env.D1_DATABASE_NAME;
 const kvNamespaceId = process.env.KV_NAMESPACE_ID;
-const r2BucketName = process.env.R2_BUCKET_NAME;
+const r2BucketName = process.env.R2_BUCKET_NAME?.trim();
+const r2PublicBaseUrl = (process.env.CF_R2_PUBLIC_BASE_URL ?? "").trim().replace(/\/+$/, "");
 
 if (!d1DatabaseName || !kvNamespaceId || !r2BucketName) {
   console.error(
@@ -237,6 +238,14 @@ const r2Put = async (objectKey: string, filePath: string): Promise<void> => {
   await runCommand(
     "wrangler",
     ["r2", "object", "put", `${r2BucketName}/${objectKey}`, "--file", filePath],
+    true
+  );
+};
+
+const r2Get = async (objectKey: string, filePath: string): Promise<void> => {
+  await runCommand(
+    "wrangler",
+    ["r2", "object", "get", `${r2BucketName}/${objectKey}`, "--file", filePath],
     true
   );
 };
@@ -567,10 +576,21 @@ const uploadCardImages = async (
   let uploaded = 0;
   let skipped = 0;
   let checked = 0;
+  let firstUploadedKey: string | undefined;
   const cardsWithImage = cards.filter((card) => Boolean(card.image && card.set?.id && card.id));
   const totalCandidates = cardsWithImage.length * 4;
-  const logProgress = createProgressLogger(lang, "images", totalCandidates, 250);
+  const logProgress = createProgressLogger(lang, "images", totalCandidates, 25);
   const syncedKeys = dryRun ? new Set<string>() : await loadSyncedImageKeys(lang);
+  console.log(
+    `[${lang}] images 阶段开始：目标桶=${r2BucketName}，候选 ${totalCandidates}（卡牌 ${cardsWithImage.length}），已索引可跳过 ${syncedKeys.size}`
+  );
+
+  const heartbeat = setInterval(() => {
+    const percent = totalCandidates > 0 ? ((checked / totalCandidates) * 100).toFixed(1) : "100.0";
+    console.log(
+      `[${lang}] images 心跳 ${checked}/${totalCandidates} (${percent}%) | 上传 ${uploaded} | 跳过 ${skipped}`
+    );
+  }, 15000);
 
   try {
     for (const card of cardsWithImage) {
@@ -597,6 +617,13 @@ const uploadCardImages = async (
               await r2Put(objectKey, filePath);
               await upsertSyncedImageKey(lang, card.id, setId, quality, ext, objectKey, card.image);
               syncedKeys.add(objectKey);
+              if (!firstUploadedKey) {
+                firstUploadedKey = objectKey;
+                const publicHint = r2PublicBaseUrl ? `${r2PublicBaseUrl}/${objectKey}` : "";
+                console.log(
+                  `[${lang}] images 首个上传对象: ${objectKey}${publicHint ? ` | 访问地址: ${publicHint}` : ""}`
+                );
+              }
             }
             uploaded += 1;
             checked += 1;
@@ -610,8 +637,27 @@ const uploadCardImages = async (
       }
     }
   } finally {
+    clearInterval(heartbeat);
     await rm(tempDir, { recursive: true, force: true });
   }
+
+  if (!dryRun && firstUploadedKey) {
+    const verifyFile = join(tmpdir(), `ptcg-dex-r2-verify-${Date.now()}.tmp`);
+    try {
+      await r2Get(firstUploadedKey, verifyFile);
+      console.log(`[${lang}] images 抽样校验成功：${firstUploadedKey} 可读取`);
+    } catch (error) {
+      console.warn(
+        `[${lang}] images 抽样校验失败：${firstUploadedKey} 读取失败，可能是账号/桶不一致。${summarizeError(error, 280)}`
+      );
+    } finally {
+      await rm(verifyFile, { force: true });
+    }
+  }
+
+  console.log(
+    `[${lang}] images 阶段完成：总处理 ${checked}/${totalCandidates} | 上传 ${uploaded} | 跳过 ${skipped}`
+  );
 
   return { uploaded, skipped };
 };

@@ -20,6 +20,7 @@ jobs:
       R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
       CF_R2_PUBLIC_BASE_URL: ${{ secrets.CF_R2_PUBLIC_BASE_URL }}
       CF_PAGES_PROJECT_NAME: ${{ secrets.CF_PAGES_PROJECT_NAME }}
+      NEXT_PUBLIC_API_BASE_URL: ${{ secrets.NEXT_PUBLIC_API_BASE_URL }}
     permissions:
       contents: read
     steps:
@@ -66,7 +67,14 @@ jobs:
         run: cp openapi/openapi.yaml apps/web/public/openapi.yaml
 
       - name: Build web app
-        run: npm --workspace @ptcg-dex/web run build
+        run: |
+          if [ -z "${NEXT_PUBLIC_API_BASE_URL:-}" ]; then
+            echo "::error::缺少 NEXT_PUBLIC_API_BASE_URL secret（示例: https://ptcg-dex-api.<subdomain>.workers.dev）"
+            exit 1
+          fi
+          NEXT_PUBLIC_R2_IMAGE_HOST=$(echo "${CF_R2_PUBLIC_BASE_URL}" | sed -E 's#^https?://##; s#/$##')
+          export NEXT_PUBLIC_R2_IMAGE_HOST
+          npm --workspace @ptcg-dex/web run build
 
       - name: Ensure Pages project exists
         run: |

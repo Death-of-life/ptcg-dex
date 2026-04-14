@@ -1,8 +1,21 @@
 import type { CardsResponse, FiltersResponse, Lang } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8787";
+const resolveApiBase = (): string => {
+  const configured = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").trim();
+  if (configured) return configured;
+
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host === "localhost" || host === "127.0.0.1") {
+      return "http://127.0.0.1:8787";
+    }
+  }
+
+  throw new Error("未配置 NEXT_PUBLIC_API_BASE_URL（线上环境必须配置）");
+};
 
 const buildUrl = (path: string, query?: URLSearchParams) => {
+  const API_BASE = resolveApiBase();
   const base = API_BASE.endsWith("/") ? API_BASE.slice(0, -1) : API_BASE;
   return `${base}${path}${query ? `?${query.toString()}` : ""}`;
 };

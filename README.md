@@ -84,6 +84,7 @@ npm run dev:web
 - `R2_BUCKET_NAME`: R2 bucket 名（如 `ptcg-dex-card-images`）
 - `TCGDEX_BASE_URL`: 可选，默认 `https://api.tcgdex.net/v2`
 - `CF_PAGES_PROJECT_NAME`: Pages 项目名（必须是 Pages Project 名称，不是 Worker 名称；deploy 会自动创建缺失项目）
+- `NEXT_PUBLIC_API_BASE_URL`: 前端调用 API 的基础地址（例如 `https://ptcg-dex-api.<subdomain>.workers.dev`）
 
 ## 同步流程说明
 

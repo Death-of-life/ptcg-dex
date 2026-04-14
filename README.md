@@ -91,11 +91,18 @@ npm run dev:web
 
 通过 GitHub Actions 手动触发 `Sync TCGdex Data`，选择 `mode=full`。
 
+当前工作流在 `mode=full` 时默认只执行：
+
+- 语言：`zh-tw`
+- 规则标识：`H`
+
+用于先小范围验证同步流程。
+
 流程：
 
 1. 拉取三语言卡列表
 2. 获取卡详情并写入 D1
-3. 全量上传卡图到 R2（`low/high + webp/png`）
+3. 上传卡图到 R2（`low/high + webp/png`）；若对象已在 `synced_images` 索引中则跳过
 4. 生成并写入语言过滤器到 D1 + KV
 5. 记录 `sync_runs` 与 `sync:latest`
 
@@ -103,6 +110,26 @@ npm run dev:web
 
 - `sync-tcgdex.yml` 每天自动运行（UTC 02:00）
 - 通过 `source_hashes` 检测变化，默认只更新变更卡和对应图片
+
+### 同步脚本参数
+
+可手动执行：
+
+```bash
+# 仅同步繁中 + H
+npm --workspace @ptcg-dex/sync run sync -- --full --lang zh-tw --regulation-mark H
+
+# 多语言
+npm --workspace @ptcg-dex/sync run sync -- --full --lang en,ja
+```
+
+支持参数：
+
+- `--full` / 默认 incremental
+- `--lang <lang[,lang]>`（`en|ja|zh-tw`）
+- `--regulation-mark <MARK>`（如 `H`）
+- `--no-images`（跳过图片）
+- `--dry-run`
 
 ### 失败重跑
 

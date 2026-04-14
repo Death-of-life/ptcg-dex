@@ -76,7 +76,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           if [ "${{ github.event.inputs.mode }}" = "full" ]; then
-            npm --workspace @ptcg-dex/sync run sync -- --full
+            npm --workspace @ptcg-dex/sync run sync -- --full --lang zh-tw --regulation-mark H
           else
             npm --workspace @ptcg-dex/sync run sync
           fi

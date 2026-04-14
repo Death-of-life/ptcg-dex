@@ -39,21 +39,58 @@ type SyncSummary = {
       changed: number;
       upserted: number;
       imagesUploaded: number;
+      imagesSkipped: number;
       filtersUpdated: number;
     }
   >;
 };
 
-const args = new Set(process.argv.slice(2));
-const mode = args.has("--full") ? "full" : "incremental";
-const dryRun = args.has("--dry-run");
-const withImages = !args.has("--no-images");
+type ProgressStage = "details" | "d1" | "images";
+
+const cliArgs = process.argv.slice(2);
+const hasFlag = (flag: string): boolean => cliArgs.includes(flag);
+const getArgValue = (flag: string): string | undefined => {
+  const idx = cliArgs.indexOf(flag);
+  if (idx < 0) return undefined;
+  const value = cliArgs[idx + 1];
+  if (!value || value.startsWith("--")) return undefined;
+  return value;
+};
+
+const mode = hasFlag("--full") ? "full" : "incremental";
+const dryRun = hasFlag("--dry-run");
+const withImages = !hasFlag("--no-images");
 const MAX_D1_SQL_CHARS = Number(process.env.D1_MAX_SQL_CHARS ?? "50000");
+
+const parseLangs = (): Lang[] => {
+  const fromArg = getArgValue("--lang");
+  const fromEnv = process.env.SYNC_LANGS;
+  const raw = (fromArg ?? fromEnv ?? "").trim();
+  if (!raw) return [...SUPPORTED_LANGS];
+  const values = raw
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const invalid = values.filter((x) => !(SUPPORTED_LANGS as readonly string[]).includes(x));
+  if (invalid.length > 0) {
+    throw new Error(`不支持的语言参数: ${invalid.join(", ")}；允许值: ${SUPPORTED_LANGS.join(", ")}`);
+  }
+  return values as Lang[];
+};
+
+const parseRegulationMark = (): string | undefined => {
+  const mark = (getArgValue("--regulation-mark") ?? process.env.SYNC_REGULATION_MARK ?? "")
+    .trim()
+    .toUpperCase();
+  return mark || undefined;
+};
 
 const tcgdexBase = ((process.env.TCGDEX_BASE_URL ?? "").trim() || "https://api.tcgdex.net/v2").replace(
   /\/+$/,
   ""
 );
+const targetLangs = parseLangs();
+const targetRegulationMark = parseRegulationMark();
 const d1DatabaseName = process.env.D1_DATABASE_NAME;
 const kvNamespaceId = process.env.KV_NAMESPACE_ID;
 const r2BucketName = process.env.R2_BUCKET_NAME;
@@ -171,6 +208,23 @@ const d1Execute = async (sql: string): Promise<void> => {
   await runCommand("wrangler", ["d1", "execute", d1DatabaseName, "--remote", "--command", sql], true);
 };
 
+const ensureSyncTables = async (): Promise<void> => {
+  await d1Execute(`
+    CREATE TABLE IF NOT EXISTS synced_images (
+      object_key TEXT PRIMARY KEY,
+      lang TEXT NOT NULL,
+      card_id TEXT NOT NULL,
+      set_id TEXT NOT NULL,
+      quality TEXT NOT NULL,
+      ext TEXT NOT NULL,
+      source_image_base TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_synced_images_lang_card
+      ON synced_images(lang, card_id);
+  `);
+};
+
 const kvPut = async (key: string, value: string): Promise<void> => {
   await runCommand(
     "wrangler",
@@ -217,19 +271,43 @@ const chunk = <T>(items: T[], size: number): T[][] => {
   return result;
 };
 
+const createProgressLogger = (
+  lang: Lang,
+  stage: ProgressStage,
+  total: number,
+  interval = 200
+) => {
+  if (total <= 0) {
+    return (_done: number, _extra?: string) => {};
+  }
+
+  let lastLogged = 0;
+  return (done: number, extra?: string) => {
+    if (done < total && done - lastLogged < interval) return;
+    lastLogged = done;
+    const percent = ((done / total) * 100).toFixed(1);
+    const suffix = extra ? ` | ${extra}` : "";
+    console.log(`[${lang}] ${stage} 进度 ${done}/${total} (${percent}%)${suffix}`);
+  };
+};
+
 const parallelMap = async <T, R>(
   items: T[],
   worker: (item: T, index: number) => Promise<R>,
-  concurrency = 8
+  concurrency = 8,
+  onProgress?: (done: number, total: number) => void
 ): Promise<R[]> => {
   const output: R[] = new Array(items.length);
   let cursor = 0;
+  let done = 0;
 
   const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
     while (true) {
       const idx = cursor++;
       if (idx >= items.length) return;
       output[idx] = await worker(items[idx], idx);
+      done += 1;
+      onProgress?.(done, items.length);
     }
   });
 
@@ -340,14 +418,52 @@ const loadExistingHashes = async (lang: Lang): Promise<Map<string, string>> => {
   return new Map(rows.map((x) => [x.id, x.source_hash]));
 };
 
-const runSqlBlocksInBatches = async (
-  blocks: Array<{ id?: string; sql: string }>
+const loadSyncedImageKeys = async (lang: Lang): Promise<Set<string>> => {
+  const rows = await d1Query<{ object_key: string }>(
+    `SELECT object_key FROM synced_images WHERE lang = ${sqlString(lang)};`
+  );
+  return new Set(rows.map((x) => x.object_key));
+};
+
+const upsertSyncedImageKey = async (
+  lang: Lang,
+  cardId: string,
+  setId: string,
+  quality: "low" | "high",
+  ext: "webp" | "png",
+  objectKey: string,
+  sourceImageBase?: string
 ): Promise<void> => {
+  await d1Execute(`
+    INSERT OR REPLACE INTO synced_images (
+      object_key, lang, card_id, set_id, quality, ext, source_image_base, updated_at
+    ) VALUES (
+      ${sqlString(objectKey)},
+      ${sqlString(lang)},
+      ${sqlString(cardId)},
+      ${sqlString(setId)},
+      ${sqlString(quality)},
+      ${sqlString(ext)},
+      ${sqlString(sourceImageBase ?? null)},
+      CURRENT_TIMESTAMP
+    );
+  `);
+};
+
+const runSqlBlocksInBatches = async (
+  blocks: Array<{ id?: string; sql: string }>,
+  onProgress?: (done: number, total: number) => void
+): Promise<void> => {
+  const total = blocks.length;
+  let done = 0;
+
   const flush = async (batch: string[]) => {
     if (batch.length === 0) return;
     // Cloudflare D1 remote execute does not allow explicit BEGIN/COMMIT.
     // We send multi-statement SQL blocks directly and control size here.
     await d1Execute(batch.join("\n"));
+    done += batch.length;
+    onProgress?.(done, total);
   };
 
   let pending: string[] = [];
@@ -434,18 +550,30 @@ VALUES(${sqlString(lang)}, ${sqlString(id)}, ${sqlString(sourceHash)}, CURRENT_T
   }
 
   if (!dryRun) {
-    await runSqlBlocksInBatches(blocks);
+    const logProgress = createProgressLogger(lang, "d1", blocks.length, 150);
+    await runSqlBlocksInBatches(blocks, (done, total) => {
+      logProgress(done, `已写入 ${done} / ${total}`);
+    });
   }
 };
 
-const uploadCardImages = async (lang: Lang, cards: CardDetail[]): Promise<number> => {
-  if (!withImages) return 0;
+const uploadCardImages = async (
+  lang: Lang,
+  cards: CardDetail[]
+): Promise<{ uploaded: number; skipped: number }> => {
+  if (!withImages) return { uploaded: 0, skipped: 0 };
 
   const tempDir = await mkdtemp(join(tmpdir(), "ptcg-dex-sync-"));
   let uploaded = 0;
+  let skipped = 0;
+  let checked = 0;
+  const cardsWithImage = cards.filter((card) => Boolean(card.image && card.set?.id && card.id));
+  const totalCandidates = cardsWithImage.length * 4;
+  const logProgress = createProgressLogger(lang, "images", totalCandidates, 250);
+  const syncedKeys = dryRun ? new Set<string>() : await loadSyncedImageKeys(lang);
 
   try {
-    for (const card of cards) {
+    for (const card of cardsWithImage) {
       const setId = card.set?.id;
       if (!card.image || !setId || !card.id) continue;
 
@@ -455,15 +583,28 @@ const uploadCardImages = async (lang: Lang, cards: CardDetail[]): Promise<number
           const objectKey = `cards/${lang}/${setId}/${card.id}/${quality}.${ext}`;
           const filePath = join(tempDir, `${lang}-${setId}-${card.id}-${quality}.${ext}`.replace(/\//g, "_"));
 
+          if (syncedKeys.has(objectKey)) {
+            skipped += 1;
+            checked += 1;
+            logProgress(checked, `上传 ${uploaded} | 跳过 ${skipped}`);
+            continue;
+          }
+
           try {
             const buffer = await fetchArrayBuffer(sourceUrl);
             await writeFile(filePath, new Uint8Array(buffer));
             if (!dryRun) {
               await r2Put(objectKey, filePath);
+              await upsertSyncedImageKey(lang, card.id, setId, quality, ext, objectKey, card.image);
+              syncedKeys.add(objectKey);
             }
             uploaded += 1;
+            checked += 1;
+            logProgress(checked, `上传 ${uploaded} | 跳过 ${skipped}`);
           } catch (error) {
             console.warn(`图片同步失败 ${sourceUrl}: ${(error as Error).message}`);
+            checked += 1;
+            logProgress(checked, `上传 ${uploaded} | 跳过 ${skipped}`);
           }
         }
       }
@@ -472,13 +613,18 @@ const uploadCardImages = async (lang: Lang, cards: CardDetail[]): Promise<number
     await rm(tempDir, { recursive: true, force: true });
   }
 
-  return uploaded;
+  return { uploaded, skipped };
 };
 
 const syncLang = async (lang: Lang, runType: "full" | "incremental") => {
   console.log(`\n=== 同步语言 ${lang} (${runType}) ===`);
 
-  const list = await fetchJson<CardListItem[]>(`${tcgdexBase}/${lang}/cards`);
+  const listUrl = new URL(`${tcgdexBase}/${lang}/cards`);
+  if (targetRegulationMark) {
+    listUrl.searchParams.set("regulationMark", `eq:${targetRegulationMark}`);
+  }
+
+  const list = await fetchJson<CardListItem[]>(listUrl.toString());
   const existing = runType === "incremental" ? await loadExistingHashes(lang) : new Map<string, string>();
 
   const changedCandidates = list.filter((item) => {
@@ -487,8 +633,14 @@ const syncLang = async (lang: Lang, runType: "full" | "incremental") => {
     return existing.get(item.id) !== candidateHash;
   });
 
-  console.log(`语言 ${lang} 总计 ${list.length}，需要更新 ${changedCandidates.length}`);
+  const skippedByHash = list.length - changedCandidates.length;
+  console.log(
+    `语言 ${lang} 总计 ${list.length}，需要更新 ${changedCandidates.length}，哈希跳过 ${skippedByHash}${
+      targetRegulationMark ? `，规则标识=${targetRegulationMark}` : ""
+    }`
+  );
 
+  const logDetailProgress = createProgressLogger(lang, "details", changedCandidates.length, 250);
   const details = await parallelMap(
     changedCandidates,
     async (item) => {
@@ -499,20 +651,28 @@ const syncLang = async (lang: Lang, runType: "full" | "incremental") => {
         return null;
       }
     },
-    8
+    8,
+    (done, total) => {
+      logDetailProgress(done, `已拉取 ${done} / ${total}`);
+    }
   );
 
   const validCards = details.filter((x): x is CardDetail => Boolean(x?.id));
 
   await upsertCards(lang, validCards);
-  const imagesUploaded = await uploadCardImages(lang, validCards);
+  const imageStats = await uploadCardImages(lang, validCards);
   const filtersUpdated = await saveFilters(lang);
+
+  console.log(
+    `[${lang}] 完成：卡片写入 ${validCards.length}，图片上传 ${imageStats.uploaded}，图片跳过 ${imageStats.skipped}，过滤器更新 ${filtersUpdated}`
+  );
 
   return {
     scanned: list.length,
     changed: changedCandidates.length,
     upserted: validCards.length,
-    imagesUploaded,
+    imagesUploaded: imageStats.uploaded,
+    imagesSkipped: imageStats.skipped,
     filtersUpdated
   };
 };
@@ -520,23 +680,48 @@ const syncLang = async (lang: Lang, runType: "full" | "incremental") => {
 const main = async () => {
   const startedAt = new Date().toISOString();
   const runType = mode;
+  console.log(
+    `同步配置: mode=${runType}, langs=${targetLangs.join(",")}, regulationMark=${targetRegulationMark ?? "ALL"}, images=${withImages ? "on" : "off"}, dryRun=${dryRun ? "on" : "off"}`
+  );
 
   if (!dryRun) {
+    await ensureSyncTables();
     await d1Execute(`
       INSERT INTO sync_runs(run_type, status, summary_json, started_at, finished_at)
       VALUES(${sqlString(runType)}, 'running', NULL, CURRENT_TIMESTAMP, NULL);
     `);
   }
 
-  const langs = [...SUPPORTED_LANGS] as Lang[];
+  const langs = targetLangs;
   const summary: SyncSummary = {
     runType,
     startedAt,
     finishedAt: startedAt,
     langs: {
-      en: { scanned: 0, changed: 0, upserted: 0, imagesUploaded: 0, filtersUpdated: 0 },
-      ja: { scanned: 0, changed: 0, upserted: 0, imagesUploaded: 0, filtersUpdated: 0 },
-      "zh-tw": { scanned: 0, changed: 0, upserted: 0, imagesUploaded: 0, filtersUpdated: 0 }
+      en: {
+        scanned: 0,
+        changed: 0,
+        upserted: 0,
+        imagesUploaded: 0,
+        imagesSkipped: 0,
+        filtersUpdated: 0
+      },
+      ja: {
+        scanned: 0,
+        changed: 0,
+        upserted: 0,
+        imagesUploaded: 0,
+        imagesSkipped: 0,
+        filtersUpdated: 0
+      },
+      "zh-tw": {
+        scanned: 0,
+        changed: 0,
+        upserted: 0,
+        imagesUploaded: 0,
+        imagesSkipped: 0,
+        filtersUpdated: 0
+      }
     }
   };
 

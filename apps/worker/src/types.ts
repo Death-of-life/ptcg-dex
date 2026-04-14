@@ -24,6 +24,9 @@ export interface ListCardsQuery {
 export interface CardListItem {
   lang: SupportedLang;
   id: string;
+  logicalId?: string;
+  defaultPrintingId?: string;
+  printingsCount?: number;
   localId?: string | null;
   name: string;
   category?: string | null;
@@ -39,6 +42,15 @@ export interface CardListItem {
 
 export interface CardDetail extends Record<string, unknown> {
   lang: SupportedLang;
+  logicalId?: string;
+  defaultPrintingId?: string;
+  printings?: Array<{
+    id: string;
+    localId?: string | null;
+    setId?: string | null;
+    setName?: string | null;
+    imageVariants?: Record<string, string>;
+  }>;
   imageVariants?: Record<string, string>;
 }
 

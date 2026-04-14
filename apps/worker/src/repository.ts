@@ -1,4 +1,4 @@
-import { SORTABLE_FIELDS, type SupportedLang } from "./constants";
+import type { SupportedLang } from "./constants";
 import type { CardDetail, CardListItem, FiltersResponse, ListCardsQuery } from "./types";
 
 const normalizePublicBaseUrl = (value: string): string => {
@@ -57,27 +57,67 @@ export const listCards = async (
   const whereSql = [`c.lang = ?`, ...where].join(" AND ");
   const whereParams = [lang, ...params];
   const offset = (query.page - 1) * query.pageSize;
-  const sortField = SORTABLE_FIELDS[query.sortBy] ?? SORTABLE_FIELDS.name;
+  const sortFieldMap: Record<ListCardsQuery["sortBy"], string> = {
+    name: "r.name",
+    hp: "r.hp",
+    updatedAt: "r.updatedAt"
+  };
+  const sortField = sortFieldMap[query.sortBy] ?? sortFieldMap.name;
 
   const listSql = `
+    WITH filtered AS (
+      SELECT
+        c.lang,
+        c.id,
+        c.local_id AS localId,
+        COALESCE(NULLIF(c.logical_id, ''), c.id) AS logicalId,
+        c.name,
+        c.category,
+        c.rarity,
+        c.set_id AS setId,
+        c.set_name AS setName,
+        c.illustrator,
+        c.hp,
+        c.image_base AS imageBase,
+        c.updated_at AS updatedAt
+      FROM cards c
+      WHERE ${whereSql}
+        AND EXISTS (
+          SELECT 1
+          FROM synced_images si
+          WHERE si.lang = c.lang
+            AND si.card_id = c.id
+            AND si.quality = 'low'
+            AND si.ext = 'webp'
+        )
+    ),
+    ranked AS (
+      SELECT
+        f.*,
+        ROW_NUMBER() OVER (PARTITION BY f.logicalId ORDER BY f.updatedAt DESC, f.id ASC) AS rn,
+        COUNT(*) OVER (PARTITION BY f.logicalId) AS printingsCount
+      FROM filtered f
+    )
     SELECT
-      c.lang,
-      c.id,
-      c.local_id AS localId,
-      c.name,
-      c.category,
-      c.rarity,
-      c.set_id AS setId,
-      c.set_name AS setName,
-      c.illustrator,
-      c.hp,
-      c.image_base AS imageBase,
-      GROUP_CONCAT(ct.type) AS typesCsv
-    FROM cards c
-    LEFT JOIN card_types ct ON ct.lang = c.lang AND ct.card_id = c.id
-    WHERE ${whereSql}
-    GROUP BY c.lang, c.id
-    ORDER BY ${sortField} ${query.sortOrder.toUpperCase()}, c.id ASC
+      r.lang,
+      r.id,
+      r.logicalId,
+      r.printingsCount,
+      r.localId,
+      r.name,
+      r.category,
+      r.rarity,
+      r.setId,
+      r.setName,
+      r.illustrator,
+      r.hp,
+      r.imageBase,
+      GROUP_CONCAT(DISTINCT ct.type) AS typesCsv
+    FROM ranked r
+    LEFT JOIN card_types ct ON ct.lang = r.lang AND ct.card_id = r.id
+    WHERE r.rn = 1
+    GROUP BY r.lang, r.id, r.logicalId, r.printingsCount, r.localId, r.name, r.category, r.rarity, r.setId, r.setName, r.illustrator, r.hp, r.imageBase, r.updatedAt
+    ORDER BY ${sortField} ${query.sortOrder.toUpperCase()}, r.id ASC
     LIMIT ? OFFSET ?
   `;
 
@@ -86,7 +126,23 @@ export const listCards = async (
     .bind(...whereParams, query.pageSize, offset)
     .all<Record<string, unknown>>();
 
-  const countSql = `SELECT COUNT(*) as total FROM cards c WHERE ${whereSql}`;
+  const countSql = `
+    SELECT COUNT(*) as total
+    FROM (
+      SELECT COALESCE(NULLIF(c.logical_id, ''), c.id) AS logicalId
+      FROM cards c
+      WHERE ${whereSql}
+        AND EXISTS (
+          SELECT 1
+          FROM synced_images si
+          WHERE si.lang = c.lang
+            AND si.card_id = c.id
+            AND si.quality = 'low'
+            AND si.ext = 'webp'
+        )
+      GROUP BY COALESCE(NULLIF(c.logical_id, ''), c.id)
+    ) q
+  `;
   const totalResult = await db
     .prepare(countSql)
     .bind(...whereParams)
@@ -96,28 +152,24 @@ export const listCards = async (
 
   const items: CardListItem[] = (rowsResult.results ?? []).map((row) => {
     const setId = typeof row.setId === "string" ? row.setId : null;
-    const id = String(row.id ?? "");
-    const imageBase = typeof row.imageBase === "string" ? row.imageBase : null;
+    const defaultPrintingId = String(row.id ?? "");
+    const logicalId = String(row.logicalId ?? defaultPrintingId);
     const root = normalizedPublicBaseUrl;
     const imageVariants = root && setId
       ? {
-          lowWebp: `${root}/cards/${lang}/${setId}/${id}/low.webp`,
-          highWebp: `${root}/cards/${lang}/${setId}/${id}/high.webp`,
-          lowPng: `${root}/cards/${lang}/${setId}/${id}/low.png`,
-          highPng: `${root}/cards/${lang}/${setId}/${id}/high.png`
+          lowWebp: `${root}/cards/${lang}/${setId}/${defaultPrintingId}/low.webp`,
+          highWebp: `${root}/cards/${lang}/${setId}/${defaultPrintingId}/high.webp`,
+          lowPng: `${root}/cards/${lang}/${setId}/${defaultPrintingId}/low.png`,
+          highPng: `${root}/cards/${lang}/${setId}/${defaultPrintingId}/high.png`
         }
-      : imageBase
-        ? {
-            lowWebp: `${imageBase}/low.webp`,
-            highWebp: `${imageBase}/high.webp`,
-            lowPng: `${imageBase}/low.png`,
-            highPng: `${imageBase}/high.png`
-          }
-        : undefined;
+      : undefined;
 
     return {
       lang,
-      id,
+      id: logicalId,
+      logicalId,
+      defaultPrintingId,
+      printingsCount: Number(row.printingsCount ?? 1) || 1,
       localId: (row.localId as string | null) ?? null,
       name: String(row.name ?? ""),
       category: (row.category as string | null) ?? null,
@@ -126,7 +178,6 @@ export const listCards = async (
       setName: (row.setName as string | null) ?? null,
       illustrator: (row.illustrator as string | null) ?? null,
       hp: (row.hp as number | null) ?? null,
-      imageBase,
       types: String(row.typesCsv ?? "")
         .split(",")
         .map((x) => x.trim())
@@ -152,34 +203,58 @@ export const getCardById = async (
   id: string,
   r2PublicBaseUrl: string
 ): Promise<CardDetail | null> => {
-  const row = await db
+  const rows = await db
     .prepare(
-      `SELECT payload, image_base as imageBase, set_id as setId FROM cards WHERE lang = ? AND id = ? LIMIT 1`
+      `
+      SELECT
+        c.id,
+        c.local_id as localId,
+        COALESCE(NULLIF(c.logical_id, ''), c.id) as logicalId,
+        c.set_id as setId,
+        c.set_name as setName,
+        c.payload
+      FROM cards c
+      WHERE c.lang = ?
+        AND (COALESCE(NULLIF(c.logical_id, ''), c.id) = ? OR c.id = ?)
+        AND EXISTS (
+          SELECT 1
+          FROM synced_images si
+          WHERE si.lang = c.lang
+            AND si.card_id = c.id
+            AND si.quality = 'low'
+            AND si.ext = 'webp'
+        )
+      ORDER BY c.updated_at DESC, c.id ASC
+    `
     )
-    .bind(lang, id)
-    .first<{ payload: string; imageBase?: string | null; setId?: string | null }>();
+    .bind(lang, id, id)
+    .all<{ id: string; logicalId: string; localId?: string | null; setId?: string | null; setName?: string | null; payload: string }>();
 
-  if (!row?.payload) return null;
-
-  const parsed = JSON.parse(row.payload) as CardDetail;
+  if ((rows.results ?? []).length === 0) return null;
+  const first = rows.results![0];
+  const parsed = JSON.parse(first.payload) as CardDetail;
   parsed.lang = lang;
+  parsed.logicalId = first.logicalId ?? id;
+  parsed.defaultPrintingId = first.id;
 
   const root = normalizePublicBaseUrl(r2PublicBaseUrl);
-  if (root && row.setId) {
-    parsed.imageVariants = {
-      lowWebp: `${root}/cards/${lang}/${row.setId}/${id}/low.webp`,
-      highWebp: `${root}/cards/${lang}/${row.setId}/${id}/high.webp`,
-      lowPng: `${root}/cards/${lang}/${row.setId}/${id}/low.png`,
-      highPng: `${root}/cards/${lang}/${row.setId}/${id}/high.png`
-    };
-  } else if (row.imageBase) {
-    parsed.imageVariants = {
-      lowWebp: `${row.imageBase}/low.webp`,
-      highWebp: `${row.imageBase}/high.webp`,
-      lowPng: `${row.imageBase}/low.png`,
-      highPng: `${row.imageBase}/high.png`
-    };
-  }
+  parsed.printings = (rows.results ?? []).map((printing) => ({
+    id: printing.id,
+    localId: printing.localId ?? null,
+    setId: printing.setId ?? null,
+    setName: printing.setName ?? null,
+    imageVariants:
+      root && printing.setId
+        ? {
+            lowWebp: `${root}/cards/${lang}/${printing.setId}/${printing.id}/low.webp`,
+            highWebp: `${root}/cards/${lang}/${printing.setId}/${printing.id}/high.webp`,
+            lowPng: `${root}/cards/${lang}/${printing.setId}/${printing.id}/low.png`,
+            highPng: `${root}/cards/${lang}/${printing.setId}/${printing.id}/high.png`
+          }
+        : undefined
+  }));
+
+  parsed.imageVariants = parsed.printings[0]?.imageVariants;
 
   return parsed;
 };

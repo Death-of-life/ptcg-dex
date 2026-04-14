@@ -126,6 +126,55 @@ const stableStringify = (value: unknown): string => {
 const sha1 = (input: unknown) =>
   createHash("sha1").update(stableStringify(input)).digest("hex");
 
+const normalizeText = (value: unknown): string =>
+  String(value ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+
+const buildLogicalSignature = (card: CardDetail): Record<string, unknown> => {
+  const attacks = Array.isArray(card.attacks)
+    ? card.attacks.map((attack) => ({
+        name: normalizeText((attack as Record<string, unknown>).name),
+        cost: Array.isArray((attack as Record<string, unknown>).cost)
+          ? ((attack as Record<string, unknown>).cost as unknown[]).map((x) => String(x)).sort()
+          : [],
+        damage: normalizeText((attack as Record<string, unknown>).damage),
+        effect: normalizeText((attack as Record<string, unknown>).effect)
+      }))
+    : [];
+
+  const abilities = Array.isArray(card.abilities)
+    ? card.abilities.map((ability) => ({
+        name: normalizeText((ability as Record<string, unknown>).name),
+        type: normalizeText((ability as Record<string, unknown>).type),
+        effect: normalizeText((ability as Record<string, unknown>).effect)
+      }))
+    : [];
+
+  const rules = Array.isArray(card.rules)
+    ? (card.rules as unknown[]).map((rule) => normalizeText(rule)).filter(Boolean)
+    : [];
+
+  return {
+    name: normalizeText(card.name),
+    category: normalizeText(card.category),
+    hp: Number(card.hp ?? 0) || 0,
+    stage: normalizeText((card as Record<string, unknown>).stage),
+    types: (card.types ?? []).map((type) => String(type)).sort(),
+    abilities,
+    attacks,
+    rules,
+    effect: normalizeText((card as Record<string, unknown>).effect),
+    description: normalizeText((card as Record<string, unknown>).description)
+  };
+};
+
+const buildLogicalId = (card: CardDetail): string => {
+  const signature = buildLogicalSignature(card);
+  return sha1(signature).slice(0, 24);
+};
+
 const sqlString = (value: unknown): string => {
   if (value === null || value === undefined) return "NULL";
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "NULL";
@@ -530,11 +579,12 @@ const upsertCards = async (lang: Lang, cards: CardDetail[]): Promise<void> => {
 
     statements.push(`
 INSERT OR REPLACE INTO cards (
-  lang, id, local_id, name, category, rarity, set_id, set_name, illustrator, hp, image_base, payload, source_hash, updated_at
+  lang, id, local_id, logical_id, name, category, rarity, set_id, set_name, illustrator, hp, has_image, image_base, payload, source_hash, updated_at
 ) VALUES (
   ${sqlString(lang)},
   ${sqlString(id)},
   ${sqlString(card.localId ?? null)},
+  ${sqlString(buildLogicalId(card))},
   ${sqlString(card.name ?? id)},
   ${sqlString(card.category ?? null)},
   ${sqlString(card.rarity ?? null)},
@@ -542,6 +592,7 @@ INSERT OR REPLACE INTO cards (
   ${sqlString(setName)},
   ${sqlString(card.illustrator ?? null)},
   ${sqlString(hp)},
+  ${card.image ? "1" : "0"},
   ${sqlString(card.image ?? null)},
   ${sqlString(payload)},
   ${sqlString(sourceHash)},

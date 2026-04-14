@@ -173,6 +173,12 @@ OpenAPI 源文件：`openapi/openapi.yaml`
 
 兼容路径：`/api/{lang}/...`（与 `/v1/{lang}/...` 行为一致）
 
+说明：
+
+- 列表接口按“逻辑卡”返回（同名同效果的多印刷版本合并）
+- `id` 为逻辑卡 ID，`defaultPrintingId` 为默认展示图对应的实体卡 ID
+- 仅返回已确认存在图片的卡（避免前端出现 404 空图）
+
 ## 环境变量（前端）
 
 - `NEXT_PUBLIC_API_BASE_URL`: Worker API 根地址

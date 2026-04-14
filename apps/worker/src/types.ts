@@ -13,6 +13,11 @@ export interface ListCardsQuery {
   setId?: string;
   rarity?: string;
   type?: string;
+  category?: string;
+  regulationMark?: string;
+  stage?: string;
+  trainerType?: string;
+  energyType?: string;
   illustrator?: string;
   hpMin?: number;
   hpMax?: number;
@@ -59,6 +64,11 @@ export interface FiltersResponse {
   lang: SupportedLang;
   types: string[];
   rarities: string[];
+  categories: string[];
+  regulationMarks: string[];
+  stages: string[];
+  trainerTypes: string[];
+  energyTypes: string[];
   illustrators: string[];
   sets: Array<{ id: string; name: string }>;
   hp: number[];

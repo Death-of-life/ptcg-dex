@@ -71,6 +71,11 @@ export type FiltersResponse = {
   lang: Lang;
   types: string[];
   rarities: string[];
+  categories: string[];
+  regulationMarks: string[];
+  stages: string[];
+  trainerTypes: string[];
+  energyTypes: string[];
   illustrators: string[];
   sets: Array<{ id: string; name: string }>;
   hp: number[];

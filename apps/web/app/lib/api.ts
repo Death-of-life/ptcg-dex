@@ -25,6 +25,11 @@ export type CardQuery = {
   setId?: string;
   rarity?: string;
   type?: string;
+  category?: string;
+  regulationMark?: string;
+  stage?: string;
+  trainerType?: string;
+  energyType?: string;
   illustrator?: string;
   hpMin?: number;
   hpMax?: number;
@@ -34,30 +39,32 @@ export type CardQuery = {
   pageSize?: number;
 };
 
-export const fetchCards = async (lang: Lang, query: CardQuery): Promise<CardsResponse> => {
+type RequestOptions = { signal?: AbortSignal };
+
+export const fetchCards = async (lang: Lang, query: CardQuery, options?: RequestOptions): Promise<CardsResponse> => {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
     if (value === undefined || value === "") continue;
     params.set(key, String(value));
   }
 
-  const resp = await fetch(buildUrl(`/v1/${lang}/cards`, params), { cache: "no-store" });
+  const resp = await fetch(buildUrl(`/v1/${lang}/cards`, params), { cache: "no-store", signal: options?.signal });
   if (!resp.ok) {
     throw new Error(`查询失败: ${resp.status}`);
   }
   return (await resp.json()) as CardsResponse;
 };
 
-export const fetchFilters = async (lang: Lang): Promise<FiltersResponse> => {
-  const resp = await fetch(buildUrl(`/v1/${lang}/filters`), { cache: "no-store" });
+export const fetchFilters = async (lang: Lang, options?: RequestOptions): Promise<FiltersResponse> => {
+  const resp = await fetch(buildUrl(`/v1/${lang}/filters`), { cache: "no-store", signal: options?.signal });
   if (!resp.ok) {
     throw new Error(`过滤器加载失败: ${resp.status}`);
   }
   return (await resp.json()) as FiltersResponse;
 };
 
-export const fetchCardDetail = async (lang: Lang, id: string): Promise<CardDetail> => {
-  const resp = await fetch(buildUrl(`/v1/${lang}/cards/${encodeURIComponent(id)}`), { cache: "no-store" });
+export const fetchCardDetail = async (lang: Lang, id: string, options?: RequestOptions): Promise<CardDetail> => {
+  const resp = await fetch(buildUrl(`/v1/${lang}/cards/${encodeURIComponent(id)}`), { cache: "no-store", signal: options?.signal });
   if (!resp.ok) {
     throw new Error(`详情加载失败: ${resp.status}`);
   }

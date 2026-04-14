@@ -427,13 +427,89 @@ const executeStatementsInChunks = async (statements: string[]): Promise<void> =>
 };
 
 const saveFilters = async (lang: Lang): Promise<number> => {
-  const [types, rarities, illustrators, hp, sets] = await Promise.all([
-    fetchJson<string[]>(`${tcgdexBase}/${lang}/types`),
-    fetchJson<string[]>(`${tcgdexBase}/${lang}/rarities`),
-    fetchJson<string[]>(`${tcgdexBase}/${lang}/illustrators`),
-    fetchJson<number[]>(`${tcgdexBase}/${lang}/hp`),
-    fetchJson<Array<{ id: string; name: string }>>(`${tcgdexBase}/${lang}/sets`)
+  const [typesRows, raritiesRows, categoriesRows, regulationRows, stageRows, trainerTypeRows, energyTypeRows, illustratorsRows, hpRows, setRows] = await Promise.all([
+    d1Query<{ value: string }>(
+      `SELECT DISTINCT type as value FROM card_types WHERE lang = ${sqlString(lang)} ORDER BY value;`
+    ),
+    d1Query<{ value: string }>(
+      `SELECT DISTINCT rarity as value
+       FROM cards
+       WHERE lang = ${sqlString(lang)} AND rarity IS NOT NULL AND rarity != ''
+       ORDER BY value;`
+    ),
+    d1Query<{ value: string }>(
+      `SELECT DISTINCT category as value
+       FROM cards
+       WHERE lang = ${sqlString(lang)} AND category IS NOT NULL AND category != ''
+       ORDER BY value;`
+    ),
+    d1Query<{ value: string }>(
+      `SELECT DISTINCT json_extract(payload, '$.regulationMark') as value
+       FROM cards
+       WHERE lang = ${sqlString(lang)}
+         AND json_extract(payload, '$.regulationMark') IS NOT NULL
+         AND json_extract(payload, '$.regulationMark') != ''
+       ORDER BY value;`
+    ),
+    d1Query<{ value: string }>(
+      `SELECT DISTINCT json_extract(payload, '$.stage') as value
+       FROM cards
+       WHERE lang = ${sqlString(lang)}
+         AND json_extract(payload, '$.stage') IS NOT NULL
+         AND json_extract(payload, '$.stage') != ''
+       ORDER BY value;`
+    ),
+    d1Query<{ value: string }>(
+      `SELECT DISTINCT json_extract(payload, '$.trainerType') as value
+       FROM cards
+       WHERE lang = ${sqlString(lang)}
+         AND json_extract(payload, '$.trainerType') IS NOT NULL
+         AND json_extract(payload, '$.trainerType') != ''
+       ORDER BY value;`
+    ),
+    d1Query<{ value: string }>(
+      `SELECT DISTINCT json_extract(payload, '$.energyType') as value
+       FROM cards
+       WHERE lang = ${sqlString(lang)}
+         AND json_extract(payload, '$.energyType') IS NOT NULL
+         AND json_extract(payload, '$.energyType') != ''
+       ORDER BY value;`
+    ),
+    d1Query<{ value: string }>(
+      `SELECT DISTINCT illustrator as value
+       FROM cards
+       WHERE lang = ${sqlString(lang)} AND illustrator IS NOT NULL AND illustrator != ''
+       ORDER BY value;`
+    ),
+    d1Query<{ value: number | string }>(
+      `SELECT DISTINCT hp as value
+       FROM cards
+       WHERE lang = ${sqlString(lang)} AND hp IS NOT NULL
+       ORDER BY value;`
+    ),
+    d1Query<{ id: string; name: string }>(
+      `SELECT DISTINCT set_id as id, set_name as name
+       FROM cards
+       WHERE lang = ${sqlString(lang)} AND set_id IS NOT NULL AND set_id != ''
+       ORDER BY name;`
+    )
   ]);
+
+  const types = typesRows.map((x) => String(x.value)).filter(Boolean);
+  const rarities = raritiesRows.map((x) => String(x.value)).filter(Boolean);
+  const categories = categoriesRows.map((x) => String(x.value)).filter(Boolean);
+  const regulationMarks = regulationRows.map((x) => String(x.value)).filter(Boolean);
+  const stages = stageRows.map((x) => String(x.value)).filter(Boolean);
+  const trainerTypes = trainerTypeRows.map((x) => String(x.value)).filter(Boolean);
+  const energyTypes = energyTypeRows.map((x) => String(x.value)).filter(Boolean);
+  const illustrators = illustratorsRows.map((x) => String(x.value)).filter(Boolean);
+  const hp = hpRows
+    .map((x) => Number(x.value))
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b);
+  const sets = setRows
+    .map((x) => ({ id: String(x.id), name: String(x.name ?? x.id) }))
+    .filter((x) => x.id);
 
   const statements: string[] = [`DELETE FROM filters WHERE lang = ${sqlString(lang)};`];
 
@@ -449,6 +525,41 @@ const saveFilters = async (lang: Lang): Promise<number> => {
       `INSERT OR REPLACE INTO filters(lang, kind, value, count) VALUES(${sqlString(
         lang
       )}, 'rarity', ${sqlString(value)}, 0);`
+    );
+  }
+  for (const value of categories) {
+    statements.push(
+      `INSERT OR REPLACE INTO filters(lang, kind, value, count) VALUES(${sqlString(
+        lang
+      )}, 'category', ${sqlString(value)}, 0);`
+    );
+  }
+  for (const value of regulationMarks) {
+    statements.push(
+      `INSERT OR REPLACE INTO filters(lang, kind, value, count) VALUES(${sqlString(
+        lang
+      )}, 'regulationMark', ${sqlString(value)}, 0);`
+    );
+  }
+  for (const value of stages) {
+    statements.push(
+      `INSERT OR REPLACE INTO filters(lang, kind, value, count) VALUES(${sqlString(
+        lang
+      )}, 'stage', ${sqlString(value)}, 0);`
+    );
+  }
+  for (const value of trainerTypes) {
+    statements.push(
+      `INSERT OR REPLACE INTO filters(lang, kind, value, count) VALUES(${sqlString(
+        lang
+      )}, 'trainerType', ${sqlString(value)}, 0);`
+    );
+  }
+  for (const value of energyTypes) {
+    statements.push(
+      `INSERT OR REPLACE INTO filters(lang, kind, value, count) VALUES(${sqlString(
+        lang
+      )}, 'energyType', ${sqlString(value)}, 0);`
     );
   }
   for (const value of illustrators) {
@@ -481,6 +592,11 @@ const saveFilters = async (lang: Lang): Promise<number> => {
         lang,
         types,
         rarities,
+        categories,
+        regulationMarks,
+        stages,
+        trainerTypes,
+        energyTypes,
         illustrators,
         hp,
         sets
@@ -488,7 +604,18 @@ const saveFilters = async (lang: Lang): Promise<number> => {
     );
   }
 
-  return types.length + rarities.length + illustrators.length + hp.length + sets.length;
+  return (
+    types.length +
+    rarities.length +
+    categories.length +
+    regulationMarks.length +
+    stages.length +
+    trainerTypes.length +
+    energyTypes.length +
+    illustrators.length +
+    hp.length +
+    sets.length
+  );
 };
 
 const loadExistingHashes = async (lang: Lang): Promise<Map<string, string>> => {

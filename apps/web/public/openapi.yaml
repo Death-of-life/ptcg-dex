@@ -93,6 +93,31 @@ paths:
           description: 属性（精确匹配）
           schema:
             type: string
+        - name: category
+          in: query
+          description: 分类（精确匹配）
+          schema:
+            type: string
+        - name: regulationMark
+          in: query
+          description: 规则标识（精确匹配）
+          schema:
+            type: string
+        - name: stage
+          in: query
+          description: 进化阶段（精确匹配）
+          schema:
+            type: string
+        - name: trainerType
+          in: query
+          description: 训练家类型（精确匹配）
+          schema:
+            type: string
+        - name: energyType
+          in: query
+          description: 能量类型（精确匹配）
+          schema:
+            type: string
         - name: hpMin
           in: query
           schema:
@@ -325,7 +350,7 @@ components:
 
     FiltersResponse:
       type: object
-      required: [lang, types, rarities, illustrators, sets, hp]
+      required: [lang, types, rarities, categories, regulationMarks, stages, trainerTypes, energyTypes, illustrators, sets, hp]
       properties:
         lang:
           $ref: "#/components/schemas/Language"
@@ -334,6 +359,26 @@ components:
           items:
             type: string
         rarities:
+          type: array
+          items:
+            type: string
+        categories:
+          type: array
+          items:
+            type: string
+        regulationMarks:
+          type: array
+          items:
+            type: string
+        stages:
+          type: array
+          items:
+            type: string
+        trainerTypes:
+          type: array
+          items:
+            type: string
+        energyTypes:
           type: array
           items:
             type: string

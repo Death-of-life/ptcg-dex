@@ -32,6 +32,26 @@ const applyCommonFilter = (query: ListCardsQuery) => {
     where.push("c.rarity = ?");
     params.push(query.rarity);
   }
+  if (query.category) {
+    where.push("c.category = ?");
+    params.push(query.category);
+  }
+  if (query.regulationMark) {
+    where.push("json_extract(c.payload, '$.regulationMark') = ?");
+    params.push(query.regulationMark);
+  }
+  if (query.stage) {
+    where.push("json_extract(c.payload, '$.stage') = ?");
+    params.push(query.stage);
+  }
+  if (query.trainerType) {
+    where.push("json_extract(c.payload, '$.trainerType') = ?");
+    params.push(query.trainerType);
+  }
+  if (query.energyType) {
+    where.push("json_extract(c.payload, '$.energyType') = ?");
+    params.push(query.energyType);
+  }
   if (query.illustrator) {
     where.push("c.illustrator = ?");
     params.push(query.illustrator);
@@ -284,6 +304,11 @@ export const getFilters = async (
       lang,
       types: byKind.get("type") ?? [],
       rarities: byKind.get("rarity") ?? [],
+      categories: byKind.get("category") ?? [],
+      regulationMarks: byKind.get("regulationMark") ?? [],
+      stages: byKind.get("stage") ?? [],
+      trainerTypes: byKind.get("trainerType") ?? [],
+      energyTypes: byKind.get("energyType") ?? [],
       illustrators: byKind.get("illustrator") ?? [],
       sets: (byKind.get("set") ?? []).map((x) => {
         const [id, ...nameParts] = x.split("|");
@@ -293,7 +318,7 @@ export const getFilters = async (
     };
   }
 
-  const [types, rarities, illustrators, sets, hp] = await Promise.all([
+  const [types, rarities, categories, regulationMarks, stages, trainerTypes, energyTypes, illustrators, sets, hp] = await Promise.all([
     db
       .prepare(`SELECT DISTINCT type FROM card_types WHERE lang = ? ORDER BY type`)
       .bind(lang)
@@ -302,6 +327,54 @@ export const getFilters = async (
       .prepare(`SELECT DISTINCT rarity FROM cards WHERE lang = ? AND rarity IS NOT NULL ORDER BY rarity`)
       .bind(lang)
       .all<{ rarity: string }>(),
+    db
+      .prepare(`SELECT DISTINCT category FROM cards WHERE lang = ? AND category IS NOT NULL ORDER BY category`)
+      .bind(lang)
+      .all<{ category: string }>(),
+    db
+      .prepare(
+        `SELECT DISTINCT json_extract(payload, '$.regulationMark') as value
+         FROM cards
+         WHERE lang = ?
+           AND json_extract(payload, '$.regulationMark') IS NOT NULL
+           AND json_extract(payload, '$.regulationMark') != ''
+         ORDER BY value`
+      )
+      .bind(lang)
+      .all<{ value: string }>(),
+    db
+      .prepare(
+        `SELECT DISTINCT json_extract(payload, '$.stage') as value
+         FROM cards
+         WHERE lang = ?
+           AND json_extract(payload, '$.stage') IS NOT NULL
+           AND json_extract(payload, '$.stage') != ''
+         ORDER BY value`
+      )
+      .bind(lang)
+      .all<{ value: string }>(),
+    db
+      .prepare(
+        `SELECT DISTINCT json_extract(payload, '$.trainerType') as value
+         FROM cards
+         WHERE lang = ?
+           AND json_extract(payload, '$.trainerType') IS NOT NULL
+           AND json_extract(payload, '$.trainerType') != ''
+         ORDER BY value`
+      )
+      .bind(lang)
+      .all<{ value: string }>(),
+    db
+      .prepare(
+        `SELECT DISTINCT json_extract(payload, '$.energyType') as value
+         FROM cards
+         WHERE lang = ?
+           AND json_extract(payload, '$.energyType') IS NOT NULL
+           AND json_extract(payload, '$.energyType') != ''
+         ORDER BY value`
+      )
+      .bind(lang)
+      .all<{ value: string }>(),
     db
       .prepare(
         `SELECT DISTINCT illustrator FROM cards WHERE lang = ? AND illustrator IS NOT NULL ORDER BY illustrator`
@@ -322,6 +395,11 @@ export const getFilters = async (
     lang,
     types: (types.results ?? []).map((x) => x.type),
     rarities: (rarities.results ?? []).map((x) => x.rarity),
+    categories: (categories.results ?? []).map((x) => x.category),
+    regulationMarks: (regulationMarks.results ?? []).map((x) => x.value),
+    stages: (stages.results ?? []).map((x) => x.value),
+    trainerTypes: (trainerTypes.results ?? []).map((x) => x.value),
+    energyTypes: (energyTypes.results ?? []).map((x) => x.value),
     illustrators: (illustrators.results ?? []).map((x) => x.illustrator),
     sets: (sets.results ?? []).map((x) => ({ id: x.id, name: x.name ?? x.id })),
     hp: (hp.results ?? []).map((x) => Number(x.hp)).filter((n) => Number.isFinite(n))

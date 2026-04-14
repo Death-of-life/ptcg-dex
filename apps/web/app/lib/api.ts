@@ -1,4 +1,4 @@
-import type { CardsResponse, FiltersResponse, Lang } from "./types";
+import type { CardDetail, CardsResponse, FiltersResponse, Lang } from "./types";
 
 const resolveApiBase = (): string => {
   const configured = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").trim();
@@ -25,6 +25,7 @@ export type CardQuery = {
   setId?: string;
   rarity?: string;
   type?: string;
+  illustrator?: string;
   hpMin?: number;
   hpMax?: number;
   sortBy?: "name" | "hp" | "updatedAt";
@@ -53,4 +54,13 @@ export const fetchFilters = async (lang: Lang): Promise<FiltersResponse> => {
     throw new Error(`过滤器加载失败: ${resp.status}`);
   }
   return (await resp.json()) as FiltersResponse;
+};
+
+export const fetchCardDetail = async (lang: Lang, id: string): Promise<CardDetail> => {
+  const resp = await fetch(buildUrl(`/v1/${lang}/cards/${encodeURIComponent(id)}`), { cache: "no-store" });
+  if (!resp.ok) {
+    throw new Error(`详情加载失败: ${resp.status}`);
+  }
+  const payload = (await resp.json()) as { card: CardDetail };
+  return payload.card;
 };

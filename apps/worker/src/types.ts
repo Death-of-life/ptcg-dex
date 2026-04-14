@@ -13,6 +13,7 @@ export interface ListCardsQuery {
   setId?: string;
   rarity?: string;
   type?: string;
+  illustrator?: string;
   hpMin?: number;
   hpMax?: number;
   page: number;

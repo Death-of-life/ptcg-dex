@@ -21,8 +21,8 @@ const applyCommonFilter = (query: ListCardsQuery) => {
   const params: unknown[] = [];
 
   if (query.name) {
-    where.push("c.name LIKE ?");
-    params.push(`%${query.name}%`);
+    where.push("(c.name LIKE ? OR c.name_zh_cn LIKE ?)");
+    params.push(`%${query.name}%`, `%${query.name}%`);
   }
   if (query.setId) {
     where.push("c.set_id = ?");
@@ -31,6 +31,10 @@ const applyCommonFilter = (query: ListCardsQuery) => {
   if (query.rarity) {
     where.push("c.rarity = ?");
     params.push(query.rarity);
+  }
+  if (query.illustrator) {
+    where.push("c.illustrator = ?");
+    params.push(query.illustrator);
   }
   if (typeof query.hpMin === "number") {
     where.push("c.hp >= ?");

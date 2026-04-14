@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
+import * as OpenCC from "opencc-js";
 
 const SUPPORTED_LANGS = ["en", "ja", "zh-tw"] as const;
 type Lang = (typeof SUPPORTED_LANGS)[number];
@@ -125,6 +126,17 @@ const stableStringify = (value: unknown): string => {
 
 const sha1 = (input: unknown) =>
   createHash("sha1").update(stableStringify(input)).digest("hex");
+
+const twToCnConverter = OpenCC.Converter({ from: "tw", to: "cn" });
+
+const toSearchNameZhCn = (lang: Lang, name?: string): string => {
+  const normalized = String(name ?? "").trim();
+  if (!normalized) return "";
+  if (lang === "zh-tw") {
+    return twToCnConverter(normalized);
+  }
+  return normalized;
+};
 
 const normalizeText = (value: unknown): string =>
   String(value ?? "")
@@ -579,13 +591,14 @@ const upsertCards = async (lang: Lang, cards: CardDetail[]): Promise<void> => {
 
     statements.push(`
 INSERT OR REPLACE INTO cards (
-  lang, id, local_id, logical_id, name, category, rarity, set_id, set_name, illustrator, hp, has_image, image_base, payload, source_hash, updated_at
+  lang, id, local_id, logical_id, name, name_zh_cn, category, rarity, set_id, set_name, illustrator, hp, has_image, image_base, payload, source_hash, updated_at
 ) VALUES (
   ${sqlString(lang)},
   ${sqlString(id)},
   ${sqlString(card.localId ?? null)},
   ${sqlString(buildLogicalId(card))},
   ${sqlString(card.name ?? id)},
+  ${sqlString(toSearchNameZhCn(lang, card.name ?? id))},
   ${sqlString(card.category ?? null)},
   ${sqlString(card.rarity ?? null)},
   ${sqlString(setId)},

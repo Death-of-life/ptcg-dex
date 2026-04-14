@@ -3,14 +3,15 @@
 import Image from "next/image";
 import { Filter, Search, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { fetchCards, fetchFilters, type CardQuery } from "./lib/api";
-import { LANGS, type CardListItem, type FiltersResponse, type Lang } from "./lib/types";
+import { fetchCardDetail, fetchCards, fetchFilters, type CardQuery } from "./lib/api";
+import { LANGS, type CardDetail, type CardListItem, type FiltersResponse, type Lang } from "./lib/types";
 
 type FilterState = {
   name: string;
   setId: string;
   rarity: string;
   type: string;
+  illustrator: string;
   hpMin: string;
   hpMax: string;
   sortBy: "name" | "hp" | "updatedAt";
@@ -23,6 +24,7 @@ const defaultFilter: FilterState = {
   setId: "",
   rarity: "",
   type: "",
+  illustrator: "",
   hpMin: "",
   hpMax: "",
   sortBy: "name",
@@ -37,7 +39,7 @@ const LANG_LABELS: Record<Lang, string> = {
 };
 
 export default function HomePage() {
-  const [lang, setLang] = useState<Lang>("en");
+  const [lang, setLang] = useState<Lang>("zh-tw");
   const [filterByLang, setFilterByLang] = useState<Record<Lang, FilterState>>({
     en: { ...defaultFilter },
     ja: { ...defaultFilter },
@@ -49,6 +51,9 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [activeCard, setActiveCard] = useState<CardDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [topbarHidden, setTopbarHidden] = useState(false);
 
   const current = filterByLang[lang];
 
@@ -58,6 +63,7 @@ export default function HomePage() {
       setId: current.setId || undefined,
       rarity: current.rarity || undefined,
       type: current.type || undefined,
+      illustrator: current.illustrator || undefined,
       hpMin: current.hpMin ? Number(current.hpMin) : undefined,
       hpMax: current.hpMax ? Number(current.hpMax) : undefined,
       sortBy: current.sortBy,
@@ -102,6 +108,18 @@ export default function HomePage() {
     return () => window.clearTimeout(timer);
   }, [lang, query]);
 
+  useEffect(() => {
+    let lastY = window.scrollY;
+    const onScroll = () => {
+      const y = window.scrollY;
+      const hiding = y > 140 && y > lastY;
+      setTopbarHidden(hiding);
+      lastY = y;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
   const updateFilter = (patch: Partial<FilterState>) => {
     setFilterByLang((prev) => {
       const next = { ...prev };
@@ -115,6 +133,17 @@ export default function HomePage() {
 
   const resetFilters = () => {
     setFilterByLang((prev) => ({ ...prev, [lang]: { ...defaultFilter } }));
+  };
+
+  const openCardDetail = async (card: CardListItem) => {
+    try {
+      setDetailLoading(true);
+      setActiveCard(await fetchCardDetail(lang, card.id));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setDetailLoading(false);
+    }
   };
 
   const filters = filterOptions[lang];
@@ -163,6 +192,21 @@ export default function HomePage() {
           {filters?.types.map((type) => (
             <option key={type} value={type}>
               {type}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        画师
+        <select
+          value={current.illustrator}
+          onChange={(e) => updateFilter({ illustrator: e.target.value })}
+          aria-label="按画师筛选"
+        >
+          <option value="">全部</option>
+          {filters?.illustrators.map((name) => (
+            <option key={name} value={name}>
+              {name}
             </option>
           ))}
         </select>
@@ -216,7 +260,7 @@ export default function HomePage() {
 
   return (
     <main className="page-shell">
-      <header className="topbar glass-panel">
+      <header className={`topbar glass-panel ${topbarHidden ? "topbar-hidden" : ""}`}>
         <div>
           <p className="kicker">Cloudflare Edition</p>
           <h1>TCGdex Atlas</h1>
@@ -280,7 +324,18 @@ export default function HomePage() {
 
           <div className="card-grid">
             {cards.map((card) => (
-              <article key={`${card.lang}-${card.id}`} className="card-item" tabIndex={0}>
+              <article
+                key={`${card.lang}-${card.id}`}
+                className="card-item"
+                tabIndex={0}
+                onClick={() => void openCardDetail(card)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    void openCardDetail(card);
+                  }
+                }}
+              >
                 <div className="card-art">
                   {card.imageVariants?.lowWebp ? (
                     <Image
@@ -296,6 +351,9 @@ export default function HomePage() {
                 <div className="card-body">
                   <h3>{card.name}</h3>
                   <p>{card.setName ?? "Unknown Set"}</p>
+                  {card.printingsCount && card.printingsCount > 1 ? (
+                    <p>版本数：{card.printingsCount}</p>
+                  ) : null}
                   <div className="chips">
                     {card.types.slice(0, 2).map((type) => (
                       <span key={type}>{type}</span>
@@ -353,6 +411,79 @@ export default function HomePage() {
           </div>
         </div>
       ) : null}
+
+      {activeCard ? (
+        <div className="mobile-drawer-backdrop" onClick={() => setActiveCard(null)}>
+          <div
+            className="detail-modal glass-panel"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="卡牌详情"
+          >
+            <div className="drawer-header">
+              <h2>{activeCard.name ?? "卡牌详情"}</h2>
+              <button onClick={() => setActiveCard(null)}>关闭</button>
+            </div>
+            <div className="detail-grid">
+              <div className="detail-image">
+                {activeCard.imageVariants?.highWebp ? (
+                  <Image
+                    src={activeCard.imageVariants.highWebp}
+                    alt={activeCard.name ?? "card"}
+                    fill
+                    sizes="(max-width: 768px) 90vw, 360px"
+                  />
+                ) : (
+                  <div className="card-fallback">No Image</div>
+                )}
+              </div>
+              <div className="detail-body">
+                <p>
+                  {activeCard.set?.name ?? "Unknown Set"} · {activeCard.rarity ?? "Unknown"}
+                </p>
+                <div className="chips">
+                  {(activeCard.types ?? []).map((type) => (
+                    <span key={type}>{type}</span>
+                  ))}
+                  {activeCard.hp ? <span>HP {activeCard.hp}</span> : null}
+                </div>
+                {activeCard.rules?.length ? (
+                  <section>
+                    <h3>规则</h3>
+                    {activeCard.rules.map((rule, idx) => (
+                      <p key={`${rule}-${idx}`}>{rule}</p>
+                    ))}
+                  </section>
+                ) : null}
+                {activeCard.abilities?.length ? (
+                  <section>
+                    <h3>特性 / 能力</h3>
+                    {activeCard.abilities.map((ability, idx) => (
+                      <p key={`${ability.name ?? "ability"}-${idx}`}>
+                        <strong>{ability.name ?? "能力"}：</strong>
+                        {ability.effect ?? "-"}
+                      </p>
+                    ))}
+                  </section>
+                ) : null}
+                {activeCard.attacks?.length ? (
+                  <section>
+                    <h3>招式</h3>
+                    {activeCard.attacks.map((attack, idx) => (
+                      <p key={`${attack.name ?? "attack"}-${idx}`}>
+                        <strong>{attack.name ?? "招式"}</strong>
+                        {attack.damage ? ` (${attack.damage})` : ""}：{attack.effect ?? "-"}
+                      </p>
+                    ))}
+                  </section>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {detailLoading ? <p className="status">正在加载详情...</p> : null}
     </main>
   );
 }

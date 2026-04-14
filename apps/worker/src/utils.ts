@@ -32,6 +32,7 @@ export const parseListQuery = (url: URL): ListCardsQuery => {
     setId: url.searchParams.get("setId") ?? undefined,
     rarity: url.searchParams.get("rarity") ?? undefined,
     type: url.searchParams.get("type") ?? undefined,
+    illustrator: url.searchParams.get("illustrator") ?? undefined,
     hpMin: parseNumber(url.searchParams.get("hpMin") ?? undefined),
     hpMax: parseNumber(url.searchParams.get("hpMax") ?? undefined),
     page: pageRaw && pageRaw > 0 ? Math.floor(pageRaw) : 1,

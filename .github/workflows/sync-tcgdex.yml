@@ -74,11 +74,35 @@ jobs:
         run: wrangler d1 migrations apply "$D1_DATABASE_NAME" --remote --config apps/worker/wrangler.toml
 
       - name: Debug R2 objects (before sync)
+        continue-on-error: true
         run: |
           echo "ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID:0:6}..."
           echo "BUCKET=$R2_BUCKET_NAME"
           wrangler r2 bucket list
-          wrangler r2 object list "$R2_BUCKET_NAME" --prefix "cards/zh-tw/" --limit 5
+          echo "从 D1 抽样 5 个 zh-tw 对象 key 并探测 R2 是否存在"
+          keys_json="$(wrangler d1 execute "$D1_DATABASE_NAME" --remote --json --command "SELECT object_key FROM synced_images WHERE lang = 'zh-tw' ORDER BY updated_at DESC LIMIT 5;")"
+          mapfile -t keys < <(echo "$keys_json" | node -e '
+            let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+              try{
+                const rows=(JSON.parse(s)?.[0]?.results)||[];
+                for (const r of rows) if (r?.object_key) console.log(r.object_key);
+              }catch(e){ process.exit(0); }
+            });
+          ')
+          if [ "${#keys[@]}" -eq 0 ]; then
+            echo "D1 中没有 zh-tw 的 synced_images 记录"
+          else
+            for key in "${keys[@]}"; do
+              out="/tmp/r2-probe-$(echo "$key" | tr '/.' '__')"
+              if wrangler r2 object get "$R2_BUCKET_NAME/$key" --file "$out" >/dev/null 2>&1; then
+                size="$(wc -c < "$out" | tr -d ' ')"
+                echo "R2 命中: $key (${size} bytes)"
+              else
+                echo "R2 缺失: $key"
+              fi
+              rm -f "$out"
+            done
+          fi
 
       - name: Run incremental sync (scheduled)
         if: github.event_name == 'schedule'
@@ -95,8 +119,32 @@ jobs:
 
       - name: Debug R2 objects (after sync)
         if: always()
+        continue-on-error: true
         run: |
           echo "ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID:0:6}..."
           echo "BUCKET=$R2_BUCKET_NAME"
           wrangler r2 bucket list
-          wrangler r2 object list "$R2_BUCKET_NAME" --prefix "cards/zh-tw/" --limit 5
+          echo "从 D1 抽样 5 个 zh-tw 对象 key 并探测 R2 是否存在"
+          keys_json="$(wrangler d1 execute "$D1_DATABASE_NAME" --remote --json --command "SELECT object_key FROM synced_images WHERE lang = 'zh-tw' ORDER BY updated_at DESC LIMIT 5;")"
+          mapfile -t keys < <(echo "$keys_json" | node -e '
+            let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+              try{
+                const rows=(JSON.parse(s)?.[0]?.results)||[];
+                for (const r of rows) if (r?.object_key) console.log(r.object_key);
+              }catch(e){ process.exit(0); }
+            });
+          ')
+          if [ "${#keys[@]}" -eq 0 ]; then
+            echo "D1 中没有 zh-tw 的 synced_images 记录"
+          else
+            for key in "${keys[@]}"; do
+              out="/tmp/r2-probe-$(echo "$key" | tr '/.' '__')"
+              if wrangler r2 object get "$R2_BUCKET_NAME/$key" --file "$out" >/dev/null 2>&1; then
+                size="$(wc -c < "$out" | tr -d ' ')"
+                echo "R2 命中: $key (${size} bytes)"
+              else
+                echo "R2 缺失: $key"
+              fi
+              rm -f "$out"
+            done
+          fi

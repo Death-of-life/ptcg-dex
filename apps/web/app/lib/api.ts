@@ -60,7 +60,20 @@ export const fetchFilters = async (lang: Lang, options?: RequestOptions): Promis
   if (!resp.ok) {
     throw new Error(`过滤器加载失败: ${resp.status}`);
   }
-  return (await resp.json()) as FiltersResponse;
+  const payload = (await resp.json()) as Partial<FiltersResponse>;
+  return {
+    lang,
+    types: payload.types ?? [],
+    rarities: payload.rarities ?? [],
+    categories: payload.categories ?? [],
+    regulationMarks: payload.regulationMarks ?? [],
+    stages: payload.stages ?? [],
+    trainerTypes: payload.trainerTypes ?? [],
+    energyTypes: payload.energyTypes ?? [],
+    illustrators: payload.illustrators ?? [],
+    sets: payload.sets ?? [],
+    hp: payload.hp ?? []
+  };
 };
 
 export const fetchCardDetail = async (lang: Lang, id: string, options?: RequestOptions): Promise<CardDetail> => {

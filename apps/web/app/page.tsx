@@ -173,7 +173,7 @@ const FilterPanel = memo(function FilterPanel({ current, filters, onChange, onRe
           系列
           <select value={current.setId} onChange={(e) => onChange({ setId: e.target.value })}>
             <option value="">全部</option>
-            {filters?.sets.map((set) => (
+            {filters?.sets?.map((set) => (
               <option key={set.id} value={set.id}>
                 {set.name}
               </option>
@@ -184,7 +184,7 @@ const FilterPanel = memo(function FilterPanel({ current, filters, onChange, onRe
           分类
           <select value={current.category} onChange={(e) => onChange({ category: e.target.value })}>
             <option value="">全部</option>
-            {filters?.categories.map((item) => (
+            {filters?.categories?.map((item) => (
               <option key={item} value={item}>
                 {item}
               </option>
@@ -195,7 +195,7 @@ const FilterPanel = memo(function FilterPanel({ current, filters, onChange, onRe
           稀有度
           <select value={current.rarity} onChange={(e) => onChange({ rarity: e.target.value })}>
             <option value="">全部</option>
-            {filters?.rarities.map((rarity) => (
+            {filters?.rarities?.map((rarity) => (
               <option key={rarity} value={rarity}>
                 {rarity}
               </option>
@@ -206,7 +206,7 @@ const FilterPanel = memo(function FilterPanel({ current, filters, onChange, onRe
           属性
           <select value={current.type} onChange={(e) => onChange({ type: e.target.value })}>
             <option value="">全部</option>
-            {filters?.types.map((type) => (
+            {filters?.types?.map((type) => (
               <option key={type} value={type}>
                 {type}
               </option>
@@ -221,7 +221,7 @@ const FilterPanel = memo(function FilterPanel({ current, filters, onChange, onRe
           规则标识
           <select value={current.regulationMark} onChange={(e) => onChange({ regulationMark: e.target.value })}>
             <option value="">全部</option>
-            {filters?.regulationMarks.map((item) => (
+            {filters?.regulationMarks?.map((item) => (
               <option key={item} value={item}>
                 {item}
               </option>
@@ -232,7 +232,7 @@ const FilterPanel = memo(function FilterPanel({ current, filters, onChange, onRe
           进化阶段
           <select value={current.stage} onChange={(e) => onChange({ stage: e.target.value })}>
             <option value="">全部</option>
-            {filters?.stages.map((item) => (
+            {filters?.stages?.map((item) => (
               <option key={item} value={item}>
                 {item}
               </option>
@@ -243,7 +243,7 @@ const FilterPanel = memo(function FilterPanel({ current, filters, onChange, onRe
           训练家类型
           <select value={current.trainerType} onChange={(e) => onChange({ trainerType: e.target.value })}>
             <option value="">全部</option>
-            {filters?.trainerTypes.map((item) => (
+            {filters?.trainerTypes?.map((item) => (
               <option key={item} value={item}>
                 {item}
               </option>
@@ -254,7 +254,7 @@ const FilterPanel = memo(function FilterPanel({ current, filters, onChange, onRe
           能量类型
           <select value={current.energyType} onChange={(e) => onChange({ energyType: e.target.value })}>
             <option value="">全部</option>
-            {filters?.energyTypes.map((item) => (
+            {filters?.energyTypes?.map((item) => (
               <option key={item} value={item}>
                 {item}
               </option>
@@ -269,7 +269,7 @@ const FilterPanel = memo(function FilterPanel({ current, filters, onChange, onRe
           画师
           <select value={current.illustrator} onChange={(e) => onChange({ illustrator: e.target.value })}>
             <option value="">全部</option>
-            {filters?.illustrators.map((name) => (
+            {filters?.illustrators?.map((name) => (
               <option key={name} value={name}>
                 {name}
               </option>

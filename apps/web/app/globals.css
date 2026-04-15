@@ -100,33 +100,6 @@ a {
   font-size: clamp(1.45rem, 3.2vw, 2.35rem);
 }
 
-.lang-switch {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.lang-switch button {
-  min-height: 44px;
-  min-width: 44px;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  background: #fff;
-  color: var(--text-soft);
-  font-weight: 700;
-  padding: 0 14px;
-  cursor: pointer;
-  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
-}
-
-.lang-switch button:hover,
-.lang-switch button.active {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-color: rgba(180, 35, 84, 0.4);
-}
-
 .hero {
   margin-top: 14px;
   padding: 20px;
@@ -589,12 +562,6 @@ a {
     top: 8px;
     flex-direction: column;
     align-items: flex-start;
-  }
-
-  .lang-switch {
-    width: 100%;
-    overflow: auto;
-    flex-wrap: nowrap;
   }
 
   .hero,

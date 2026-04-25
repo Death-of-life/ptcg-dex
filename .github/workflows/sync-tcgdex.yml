@@ -29,6 +29,9 @@ jobs:
       D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
       KV_NAMESPACE_ID: ${{ secrets.KV_NAMESPACE_ID }}
       R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+      R2_S3_ENDPOINT: ${{ secrets.R2_S3_ENDPOINT }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       TCGDEX_BASE_URL: ${{ secrets.TCGDEX_BASE_URL }}
       CF_R2_PUBLIC_BASE_URL: ${{ secrets.CF_R2_PUBLIC_BASE_URL }}
     steps:
@@ -112,7 +115,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           if [ "${{ github.event.inputs.mode }}" = "full" ]; then
-            npm --workspace @ptcg-dex/sync run sync -- --full --lang zh-tw --regulation-mark H
+            npm --workspace @ptcg-dex/sync run sync -- --full
           else
             npm --workspace @ptcg-dex/sync run sync
           fi

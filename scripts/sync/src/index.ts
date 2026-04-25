@@ -1,11 +1,18 @@
-import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createHash, createHmac } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import * as OpenCC from "opencc-js";
+import { config as loadEnv } from "dotenv";
 
-const SUPPORTED_LANGS = ["en", "ja", "zh-tw"] as const;
+const scriptDir = dirname(fileURLToPath(import.meta.url));
+loadEnv({ path: resolve(scriptDir, "../../../.env") });
+loadEnv();
+
+const SUPPORTED_LANGS = ["zh-tw"] as const;
+const DEFAULT_REGULATION_MARKS = ["H", "I", "J"] as const;
 type Lang = (typeof SUPPORTED_LANGS)[number];
 
 type CardListItem = {
@@ -33,17 +40,16 @@ type SyncSummary = {
   runType: "full" | "incremental";
   startedAt: string;
   finishedAt: string;
-  langs: Record<
-    Lang,
-    {
-      scanned: number;
-      changed: number;
-      upserted: number;
-      imagesUploaded: number;
-      imagesSkipped: number;
-      filtersUpdated: number;
-    }
-  >;
+  langs: Record<Lang, LangSyncStats>;
+};
+
+type LangSyncStats = {
+  scanned: number;
+  changed: number;
+  upserted: number;
+  imagesUploaded: number;
+  imagesSkipped: number;
+  filtersUpdated: number;
 };
 
 type ProgressStage = "details" | "d1" | "images";
@@ -79,11 +85,15 @@ const parseLangs = (): Lang[] => {
   return values as Lang[];
 };
 
-const parseRegulationMark = (): string | undefined => {
-  const mark = (getArgValue("--regulation-mark") ?? process.env.SYNC_REGULATION_MARK ?? "")
+const parseRegulationMarks = (): string[] => {
+  const raw = (getArgValue("--regulation-mark") ?? process.env.SYNC_REGULATION_MARKS ?? process.env.SYNC_REGULATION_MARK ?? "")
     .trim()
     .toUpperCase();
-  return mark || undefined;
+  if (!raw) return [...DEFAULT_REGULATION_MARKS];
+  return raw
+    .split(/[\s,]+/)
+    .map((mark) => mark.trim())
+    .filter(Boolean);
 };
 
 const tcgdexBase = ((process.env.TCGDEX_BASE_URL ?? "").trim() || "https://api.tcgdex.net/v2").replace(
@@ -91,15 +101,18 @@ const tcgdexBase = ((process.env.TCGDEX_BASE_URL ?? "").trim() || "https://api.t
   ""
 );
 const targetLangs = parseLangs();
-const targetRegulationMark = parseRegulationMark();
+const targetRegulationMarks = parseRegulationMarks();
 const d1DatabaseName = process.env.D1_DATABASE_NAME;
 const kvNamespaceId = process.env.KV_NAMESPACE_ID;
 const r2BucketName = process.env.R2_BUCKET_NAME?.trim();
 const r2PublicBaseUrl = (process.env.CF_R2_PUBLIC_BASE_URL ?? "").trim().replace(/\/+$/, "");
+const r2S3Endpoint = process.env.R2_S3_ENDPOINT?.trim().replace(/\/+$/, "");
+const r2AccessKeyId = process.env.R2_ACCESS_KEY_ID?.trim();
+const r2SecretAccessKey = process.env.R2_SECRET_ACCESS_KEY?.trim();
 
-if (!d1DatabaseName || !kvNamespaceId || !r2BucketName) {
+if (!d1DatabaseName || !kvNamespaceId || !r2BucketName || !r2S3Endpoint || !r2AccessKeyId || !r2SecretAccessKey) {
   console.error(
-    "缺少环境变量: D1_DATABASE_NAME, KV_NAMESPACE_ID, R2_BUCKET_NAME（需要在 GitHub Secrets 或环境中提供）"
+    "缺少环境变量: D1_DATABASE_NAME, KV_NAMESPACE_ID, R2_BUCKET_NAME, R2_S3_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY（需要在 GitHub Secrets 或环境中提供）"
   );
   process.exit(1);
 }
@@ -126,6 +139,89 @@ const stableStringify = (value: unknown): string => {
 
 const sha1 = (input: unknown) =>
   createHash("sha1").update(stableStringify(input)).digest("hex");
+
+const sha256Hex = (input: string | Uint8Array): string =>
+  createHash("sha256").update(input).digest("hex");
+
+const hmac = (key: string | Buffer, input: string): Buffer =>
+  createHmac("sha256", key).update(input).digest();
+
+const awsEncode = (value: string): string =>
+  encodeURIComponent(value).replace(/[!'()*]/g, (char) =>
+    `%${char.charCodeAt(0).toString(16).toUpperCase()}`
+  );
+
+const buildS3Url = (objectKey: string): { url: URL; canonicalUri: string } => {
+  const endpoint = new URL(r2S3Endpoint);
+  const basePath = endpoint.pathname.replace(/\/+$/, "");
+  const encodedBucket = awsEncode(r2BucketName);
+  const encodedKey = objectKey.split("/").map(awsEncode).join("/");
+  const canonicalUri = `${basePath}/${encodedBucket}/${encodedKey}`.replace(/\/{2,}/g, "/");
+  endpoint.pathname = canonicalUri;
+  endpoint.search = "";
+  return { url: endpoint, canonicalUri };
+};
+
+const r2S3Request = async (
+  method: "GET" | "PUT",
+  objectKey: string,
+  body?: Uint8Array
+): Promise<ArrayBuffer> => {
+  const { url, canonicalUri } = buildS3Url(objectKey);
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, "");
+  const dateStamp = amzDate.slice(0, 8);
+  const payloadHash = sha256Hex(body ?? "");
+  const host = url.host;
+  const region = "auto";
+  const service = "s3";
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+  const signedHeaders = "host;x-amz-content-sha256;x-amz-date";
+  const canonicalHeaders = [
+    `host:${host}`,
+    `x-amz-content-sha256:${payloadHash}`,
+    `x-amz-date:${amzDate}`
+  ].join("\n") + "\n";
+  const canonicalRequest = [
+    method,
+    canonicalUri,
+    "",
+    canonicalHeaders,
+    signedHeaders,
+    payloadHash
+  ].join("\n");
+  const stringToSign = [
+    "AWS4-HMAC-SHA256",
+    amzDate,
+    credentialScope,
+    sha256Hex(canonicalRequest)
+  ].join("\n");
+  const signingKey = hmac(
+    hmac(hmac(hmac(`AWS4${r2SecretAccessKey}`, dateStamp), region), service),
+    "aws4_request"
+  );
+  const signature = createHmac("sha256", signingKey).update(stringToSign).digest("hex");
+  const authorization = [
+    `AWS4-HMAC-SHA256 Credential=${r2AccessKeyId}/${credentialScope}`,
+    `SignedHeaders=${signedHeaders}`,
+    `Signature=${signature}`
+  ].join(", ");
+
+  const res = await fetch(url, {
+    method,
+    headers: {
+      authorization,
+      "x-amz-content-sha256": payloadHash,
+      "x-amz-date": amzDate
+    },
+    body: method === "PUT" ? (body as BodyInit) : undefined
+  });
+  if (!res.ok) {
+    const details = (await res.text()).replace(/\s+/g, " ").trim().slice(0, 1000);
+    throw new Error(`R2 S3 ${method} ${objectKey} 失败: ${res.status} ${details}`);
+  }
+  return await res.arrayBuffer();
+};
 
 const twToCnConverter = OpenCC.Converter({ from: "tw", to: "cn" });
 
@@ -296,19 +392,13 @@ const kvPut = async (key: string, value: string): Promise<void> => {
 };
 
 const r2Put = async (objectKey: string, filePath: string): Promise<void> => {
-  await runCommand(
-    "wrangler",
-    ["r2", "object", "put", `${r2BucketName}/${objectKey}`, "--file", filePath],
-    true
-  );
+  const body = await readFile(filePath);
+  await r2S3Request("PUT", objectKey, body);
 };
 
 const r2Get = async (objectKey: string, filePath: string): Promise<void> => {
-  await runCommand(
-    "wrangler",
-    ["r2", "object", "get", `${r2BucketName}/${objectKey}`, "--file", filePath],
-    true
-  );
+  const bytes = await r2S3Request("GET", objectKey);
+  await writeFile(filePath, new Uint8Array(bytes));
 };
 
 const fetchJson = async <T>(url: string): Promise<T> => {
@@ -881,15 +971,35 @@ const uploadCardImages = async (
   return { uploaded, skipped };
 };
 
+const fetchCardList = async (lang: Lang): Promise<CardListItem[]> => {
+  if (targetRegulationMarks.length === 0) {
+    return await fetchJson<CardListItem[]>(`${tcgdexBase}/${lang}/cards`);
+  }
+
+  const byId = new Map<string, CardListItem>();
+  for (const mark of targetRegulationMarks) {
+    const listUrl = new URL(`${tcgdexBase}/${lang}/cards`);
+    listUrl.searchParams.set("regulationMark", `eq:${mark}`);
+    const list = await fetchJson<CardListItem[]>(listUrl.toString());
+    for (const item of list) {
+      byId.set(item.id, item);
+    }
+  }
+  return [...byId.values()];
+};
+
+const hasTargetRegulationMark = (card: CardDetail): boolean => {
+  if (targetRegulationMarks.length === 0) return true;
+  const mark = String(card.regulationMark ?? "")
+    .trim()
+    .toUpperCase();
+  return targetRegulationMarks.includes(mark);
+};
+
 const syncLang = async (lang: Lang, runType: "full" | "incremental") => {
   console.log(`\n=== 同步语言 ${lang} (${runType}) ===`);
 
-  const listUrl = new URL(`${tcgdexBase}/${lang}/cards`);
-  if (targetRegulationMark) {
-    listUrl.searchParams.set("regulationMark", `eq:${targetRegulationMark}`);
-  }
-
-  const list = await fetchJson<CardListItem[]>(listUrl.toString());
+  const list = await fetchCardList(lang);
   const existing = runType === "incremental" ? await loadExistingHashes(lang) : new Map<string, string>();
 
   const changedCandidates = list.filter((item) => {
@@ -901,7 +1011,7 @@ const syncLang = async (lang: Lang, runType: "full" | "incremental") => {
   const skippedByHash = list.length - changedCandidates.length;
   console.log(
     `语言 ${lang} 总计 ${list.length}，需要更新 ${changedCandidates.length}，哈希跳过 ${skippedByHash}${
-      targetRegulationMark ? `，规则标识=${targetRegulationMark}` : ""
+      targetRegulationMarks.length > 0 ? `，规则标识=${targetRegulationMarks.join(",")}` : ""
     }`
   );
 
@@ -922,7 +1032,10 @@ const syncLang = async (lang: Lang, runType: "full" | "incremental") => {
     }
   );
 
-  const validCards = details.filter((x): x is CardDetail => Boolean(x?.id));
+  const validCards = details.filter((x): x is CardDetail => {
+    if (!x?.id) return false;
+    return hasTargetRegulationMark(x);
+  });
 
   await upsertCards(lang, validCards);
   const imageStats = await uploadCardImages(lang, validCards);
@@ -946,7 +1059,7 @@ const main = async () => {
   const startedAt = new Date().toISOString();
   const runType = mode;
   console.log(
-    `同步配置: mode=${runType}, langs=${targetLangs.join(",")}, regulationMark=${targetRegulationMark ?? "ALL"}, images=${withImages ? "on" : "off"}, dryRun=${dryRun ? "on" : "off"}`
+    `同步配置: mode=${runType}, langs=${targetLangs.join(",")}, regulationMarks=${targetRegulationMarks.length > 0 ? targetRegulationMarks.join(",") : "ALL"}, images=${withImages ? "on" : "off"}, dryRun=${dryRun ? "on" : "off"}`
   );
 
   if (!dryRun) {
@@ -963,22 +1076,6 @@ const main = async () => {
     startedAt,
     finishedAt: startedAt,
     langs: {
-      en: {
-        scanned: 0,
-        changed: 0,
-        upserted: 0,
-        imagesUploaded: 0,
-        imagesSkipped: 0,
-        filtersUpdated: 0
-      },
-      ja: {
-        scanned: 0,
-        changed: 0,
-        upserted: 0,
-        imagesUploaded: 0,
-        imagesSkipped: 0,
-        filtersUpdated: 0
-      },
       "zh-tw": {
         scanned: 0,
         changed: 0,

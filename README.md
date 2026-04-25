@@ -82,6 +82,9 @@ npm run dev:web
 - `D1_DATABASE_ID`: D1 数据库 ID（Cloudflare 控制台可查）
 - `KV_NAMESPACE_ID`: KV namespace ID
 - `R2_BUCKET_NAME`: R2 bucket 名（如 `ptcg-dex-card-images`）
+- `R2_S3_ENDPOINT`: R2 S3 API endpoint（如 `https://<account_id>.r2.cloudflarestorage.com`）
+- `R2_ACCESS_KEY_ID`: R2 S3 访问密钥 ID
+- `R2_SECRET_ACCESS_KEY`: R2 S3 机密访问密钥
 - `TCGDEX_BASE_URL`: 可选，默认 `https://api.tcgdex.net/v2`
 - `CF_PAGES_PROJECT_NAME`: Pages 项目名（必须是 Pages Project 名称，不是 Worker 名称；deploy 会自动创建缺失项目）
 - `NEXT_PUBLIC_API_BASE_URL`: 前端调用 API 的基础地址（例如 `https://ptcg-dex-api.<subdomain>.workers.dev`）
@@ -95,15 +98,15 @@ npm run dev:web
 当前工作流在 `mode=full` 时默认只执行：
 
 - 语言：`zh-tw`
-- 规则标识：`H`
+- 规则标识：`H`、`I`、`J`
 
 用于先小范围验证同步流程。
 
 流程：
 
-1. 拉取三语言卡列表
+1. 拉取繁中卡列表
 2. 获取卡详情并写入 D1
-3. 上传卡图到 R2（`low/high + webp/png`）；若对象已在 `synced_images` 索引中则跳过
+3. 通过 R2 S3 API 上传卡图（`low/high + webp/png`）；若对象已在 `synced_images` 索引中则跳过
 4. 生成并写入语言过滤器到 D1 + KV
 5. 记录 `sync_runs` 与 `sync:latest`
 
@@ -117,18 +120,15 @@ npm run dev:web
 可手动执行：
 
 ```bash
-# 仅同步繁中 + H
-npm --workspace @ptcg-dex/sync run sync -- --full --lang zh-tw --regulation-mark H
-
-# 多语言
-npm --workspace @ptcg-dex/sync run sync -- --full --lang en,ja
+# 默认同步繁中 + H/I/J
+npm --workspace @ptcg-dex/sync run sync -- --full
 ```
 
 支持参数：
 
 - `--full` / 默认 incremental
-- `--lang <lang[,lang]>`（`en|ja|zh-tw`）
-- `--regulation-mark <MARK>`（如 `H`）
+- `--lang <lang[,lang]>`（当前同步脚本仅支持 `zh-tw`）
+- `--regulation-mark <MARK[,MARK]>`（默认 `H,I,J`）
 - `--no-images`（跳过图片）
 - `--dry-run`
 

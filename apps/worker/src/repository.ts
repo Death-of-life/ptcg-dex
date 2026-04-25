@@ -16,14 +16,73 @@ const withTypeFilter = (query: ListCardsQuery, where: string[], params: unknown[
   params.push(query.type);
 };
 
+const normalizeSearchTerm = (value: string): string => value.trim().replace(/\s+/g, " ").toLowerCase();
+
+const buildLikeNameFilter = (name: string) => ({
+  where: "(c.name LIKE ? OR c.name_zh_cn LIKE ?)",
+  params: [`%${name}%`, `%${name}%`]
+});
+
+const buildNameFilter = async (db: D1Database, lang: SupportedLang, name?: string) => {
+  if (!name) return null;
+
+  const normalized = normalizeSearchTerm(name);
+  if (!normalized) return null;
+
+  try {
+    const coverage = await db
+      .prepare(
+        `
+        SELECT
+          (SELECT COUNT(DISTINCT card_id) FROM card_search_terms WHERE lang = ?) AS indexedCards,
+          (SELECT COUNT(*) FROM cards WHERE lang = ?) AS totalCards
+      `
+      )
+      .bind(lang, lang)
+      .first<{ indexedCards: number | string; totalCards: number | string }>();
+    const indexedCards = Number(coverage?.indexedCards ?? 0);
+    const totalCards = Number(coverage?.totalCards ?? 0);
+    if (!totalCards || indexedCards < totalCards) {
+      return buildLikeNameFilter(name);
+    }
+
+    const hasSearchTerm = await db
+      .prepare(
+        `
+        SELECT 1
+        FROM card_search_terms
+        WHERE lang = ? AND term = ?
+        LIMIT 1
+      `
+      )
+      .bind(lang, normalized)
+      .first();
+
+    if (hasSearchTerm) {
+      return {
+        where: `
+          EXISTS (
+            SELECT 1
+            FROM card_search_terms st
+            WHERE st.lang = c.lang
+              AND st.card_id = c.id
+              AND st.term = ?
+          )
+        `,
+        params: [normalized]
+      };
+    }
+  } catch {
+    // Deployments can briefly run new code before the migration/table is present.
+  }
+
+  return buildLikeNameFilter(name);
+};
+
 const applyCommonFilter = (query: ListCardsQuery) => {
   const where: string[] = [];
   const params: unknown[] = [];
 
-  if (query.name) {
-    where.push("(c.name LIKE ? OR c.name_zh_cn LIKE ?)");
-    params.push(`%${query.name}%`, `%${query.name}%`);
-  }
   if (query.setId) {
     where.push("c.set_id = ?");
     params.push(query.setId);
@@ -77,6 +136,11 @@ export const listCards = async (
   r2PublicBaseUrl: string
 ): Promise<{ items: CardListItem[]; total: number; page: number; pageSize: number }> => {
   const { where, params } = applyCommonFilter(query);
+  const nameFilter = await buildNameFilter(db, lang, query.name);
+  if (nameFilter) {
+    where.push(nameFilter.where);
+    params.push(...nameFilter.params);
+  }
 
   const whereSql = [`c.lang = ?`, ...where].join(" AND ");
   const whereParams = [lang, ...params];
@@ -151,21 +215,17 @@ export const listCards = async (
     .all<Record<string, unknown>>();
 
   const countSql = `
-    SELECT COUNT(*) as total
-    FROM (
-      SELECT COALESCE(NULLIF(c.logical_id, ''), c.id) AS logicalId
-      FROM cards c
-      WHERE ${whereSql}
-        AND EXISTS (
-          SELECT 1
-          FROM synced_images si
-          WHERE si.lang = c.lang
-            AND si.card_id = c.id
-            AND si.quality = 'low'
-            AND si.ext = 'webp'
-        )
-      GROUP BY COALESCE(NULLIF(c.logical_id, ''), c.id)
-    ) q
+    SELECT COUNT(DISTINCT COALESCE(NULLIF(c.logical_id, ''), c.id)) as total
+    FROM cards c
+    WHERE ${whereSql}
+      AND EXISTS (
+        SELECT 1
+        FROM synced_images si
+        WHERE si.lang = c.lang
+          AND si.card_id = c.id
+          AND si.quality = 'low'
+          AND si.ext = 'webp'
+      )
   `;
   const totalResult = await db
     .prepare(countSql)

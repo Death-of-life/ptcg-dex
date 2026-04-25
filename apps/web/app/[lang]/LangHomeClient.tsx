@@ -4,7 +4,7 @@ import Image from "next/image";
 import { Filter, Search, Sparkles } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchCardDetail, fetchCards, fetchFilters, type CardQuery } from "../lib/api";
-import { type CardDetail, type CardListItem, type FiltersResponse, type Lang } from "../lib/types";
+import { type CardDetail, type CardListItem, type CardsResponse, type FiltersResponse, type Lang } from "../lib/types";
 
 type FilterState = {
   name: string;
@@ -67,6 +67,14 @@ const detectCategory = (category?: string): "pokemon" | "trainer" | "energy" | "
   return "unknown";
 };
 
+const buildQueryCacheKey = (lang: Lang, query: CardQuery): string => {
+  const normalized = Object.entries(query)
+    .filter(([, value]) => value !== undefined && value !== "")
+    .map(([key, value]) => [key, String(value).trim().replace(/\s+/g, " ")])
+    .sort(([a], [b]) => a.localeCompare(b));
+  return `${lang}:${JSON.stringify(normalized)}`;
+};
+
 type TopBarProps = {
   topbarHidden: boolean;
 };
@@ -85,19 +93,23 @@ const TopBar = memo(function TopBar({ topbarHidden }: TopBarProps) {
 type SearchPanelProps = {
   lang: Lang;
   total: number;
-  name: string;
+  nameDraft: string;
   onNameChange: (value: string) => void;
+  onSearch: () => void;
   onOpenRandom: () => void;
   randomLoading: boolean;
+  searchDisabled: boolean;
 };
 
 const SearchPanel = memo(function SearchPanel({
   lang,
   total,
-  name,
+  nameDraft,
   onNameChange,
+  onSearch,
   onOpenRandom,
-  randomLoading
+  randomLoading,
+  searchDisabled
 }: SearchPanelProps) {
   return (
     <section className="hero panel" aria-label="搜索与概览">
@@ -113,13 +125,23 @@ const SearchPanel = memo(function SearchPanel({
         <div className="searchbox" role="search">
           <Search size={18} />
           <input
-            value={name}
+            value={nameDraft}
             onChange={(e) => onNameChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onSearch();
+              }
+            }}
             placeholder="输入卡牌名称，支持繁简关键词"
             aria-label="搜索卡牌名称"
           />
         </div>
         <div className="hero-action-buttons">
+          <button className="primary-btn" type="button" onClick={onSearch} disabled={searchDisabled}>
+            <Search size={17} />
+            搜索
+          </button>
           <button className="ghost-btn" type="button" onClick={onOpenRandom} disabled={randomLoading}>
             {randomLoading ? "随机中..." : "随机一张"}
           </button>
@@ -134,12 +156,23 @@ const SearchPanel = memo(function SearchPanel({
 
 type FilterPanelProps = {
   current: FilterState;
+  nameDraft: string;
   filters?: FiltersResponse;
   onChange: (patch: Partial<FilterState>) => void;
+  onNameChange: (value: string) => void;
+  onSearch: () => void;
   onReset: () => void;
 };
 
-const FilterPanel = memo(function FilterPanel({ current, filters, onChange, onReset }: FilterPanelProps) {
+const FilterPanel = memo(function FilterPanel({
+  current,
+  nameDraft,
+  filters,
+  onChange,
+  onNameChange,
+  onSearch,
+  onReset
+}: FilterPanelProps) {
   return (
     <div className="panel filter-panel" role="region" aria-label="筛选器">
       <h2>筛选器</h2>
@@ -149,11 +182,20 @@ const FilterPanel = memo(function FilterPanel({ current, filters, onChange, onRe
         <label>
           名称
           <input
-            value={current.name}
-            onChange={(e) => onChange({ name: e.target.value })}
+            value={nameDraft}
+            onChange={(e) => onNameChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                onSearch();
+              }
+            }}
             placeholder="关键词"
           />
         </label>
+        <button className="secondary-btn filter-search-btn" type="button" onClick={onSearch}>
+          搜索名称
+        </button>
         <label>
           系列
           <select value={current.setId} onChange={(e) => onChange({ setId: e.target.value })}>
@@ -317,8 +359,8 @@ type CardGridProps = {
 };
 
 const CardGrid = memo(function CardGrid({ cards, loading, error, onOpenCard }: CardGridProps) {
-  if (loading) return <p className="status">正在查询...</p>;
-  if (error) return <p className="status error">{error}</p>;
+  if (loading && cards.length === 0) return <p className="status">正在查询...</p>;
+  if (error && cards.length === 0) return <p className="status error">{error}</p>;
   if (cards.length === 0) {
     return (
       <div className="empty-state">
@@ -329,47 +371,53 @@ const CardGrid = memo(function CardGrid({ cards, loading, error, onOpenCard }: C
   }
 
   return (
-    <div className="card-grid">
-      {cards.map((card) => (
-        <article
-          key={`${card.lang}-${card.id}-${card.defaultPrintingId ?? "default"}`}
-          className="card-item"
-          tabIndex={0}
-          onClick={() => onOpenCard(card)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              onOpenCard(card);
-            }
-          }}
-        >
-          <div className="card-art">
-            {card.imageVariants?.lowWebp ? (
-              <Image
-                src={card.imageVariants.lowWebp}
-                alt={card.name}
-                fill
-                loading="lazy"
-                sizes="(max-width: 768px) 46vw, (max-width: 1200px) 28vw, 20vw"
-              />
-            ) : (
-              <div className="card-fallback">No Image</div>
-            )}
-          </div>
-          <div className="card-body">
-            <h3 title={card.name}>{card.name}</h3>
-            <p className="set-line" title={card.setName ?? "Unknown Set"}>{card.setName ?? "Unknown Set"}</p>
-            {card.printingsCount && card.printingsCount > 1 ? <p className="meta-line">版本数：{card.printingsCount}</p> : null}
-            <div className="chips">
-              {card.types.slice(0, 2).map((type) => (
-                <span key={type}>{type}</span>
-              ))}
-              {card.hp ? <span>HP {card.hp}</span> : null}
+    <>
+      {loading ? <p className="status inline-status">正在刷新结果...</p> : null}
+      {error ? <p className="status error inline-status">{error}</p> : null}
+      <div className="card-grid" aria-busy={loading}>
+        {cards.map((card) => (
+          <article
+            key={`${card.lang}-${card.id}-${card.defaultPrintingId ?? "default"}`}
+            className="card-item"
+            tabIndex={0}
+            onClick={() => onOpenCard(card)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onOpenCard(card);
+              }
+            }}
+          >
+            <div className="card-art">
+              {card.imageVariants?.lowWebp ? (
+                <Image
+                  src={card.imageVariants.lowWebp}
+                  alt={card.name}
+                  fill
+                  loading="lazy"
+                  decoding="async"
+                  fetchPriority="low"
+                  sizes="(max-width: 768px) 46vw, (max-width: 1200px) 28vw, 20vw"
+                />
+              ) : (
+                <div className="card-fallback">No Image</div>
+              )}
             </div>
-          </div>
-        </article>
-      ))}
-    </div>
+            <div className="card-body">
+              <h3 title={card.name}>{card.name}</h3>
+              <p className="set-line" title={card.setName ?? "Unknown Set"}>{card.setName ?? "Unknown Set"}</p>
+              {card.printingsCount && card.printingsCount > 1 ? <p className="meta-line">版本数：{card.printingsCount}</p> : null}
+              <div className="chips">
+                {card.types.slice(0, 2).map((type) => (
+                  <span key={type}>{type}</span>
+                ))}
+                {card.hp ? <span>HP {card.hp}</span> : null}
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </>
   );
 });
 
@@ -612,6 +660,8 @@ const DetailModal = memo(function DetailModal({
 
 export default function LangHomeClient({ lang }: { lang: Lang }) {
   const [current, setCurrent] = useState<FilterState>({ ...defaultFilter });
+  const [nameDraft, setNameDraft] = useState(defaultFilter.name);
+  const [searchVersion, setSearchVersion] = useState(0);
   const [filterOptions, setFilterOptions] = useState<FiltersResponse | null>(null);
   const [cards, setCards] = useState<CardListItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -627,6 +677,7 @@ export default function LangHomeClient({ lang }: { lang: Lang }) {
   const [rawCopied, setRawCopied] = useState(false);
 
   const detailAbortRef = useRef<AbortController | null>(null);
+  const queryCacheRef = useRef(new Map<string, CardsResponse>());
 
   const query = useMemo<CardQuery>(() => {
     return {
@@ -650,6 +701,7 @@ export default function LangHomeClient({ lang }: { lang: Lang }) {
   }, [current]);
 
   const pageCount = Math.max(1, Math.ceil(total / DEFAULT_PAGE_SIZE));
+  const queryCacheKey = useMemo(() => buildQueryCacheKey(lang, query), [lang, query]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -667,6 +719,8 @@ export default function LangHomeClient({ lang }: { lang: Lang }) {
 
   useEffect(() => {
     setCurrent({ ...defaultFilter });
+    setNameDraft(defaultFilter.name);
+    setSearchVersion(0);
     setCards([]);
     setTotal(0);
     setLangTotal(0);
@@ -678,31 +732,37 @@ export default function LangHomeClient({ lang }: { lang: Lang }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      setLoading(true);
-      setError(null);
+    const cached = queryCacheRef.current.get(queryCacheKey);
 
-      fetchCards(lang, query, { signal: controller.signal })
-        .then((res) => {
-          setCards(res.items ?? []);
-          setTotal(res.total ?? 0);
-        })
-        .catch((e) => {
-          if ((e as Error).name === "AbortError") return;
-          setError((e as Error).message);
-        })
-        .finally(() => {
-          if (!controller.signal.aborted) {
-            setLoading(false);
-          }
-        });
-    }, 180);
+    if (cached) {
+      setCards(cached.items ?? []);
+      setTotal(cached.total ?? 0);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+    setError(null);
+
+    fetchCards(lang, query, { signal: controller.signal })
+      .then((res) => {
+        queryCacheRef.current.set(queryCacheKey, res);
+        setCards(res.items ?? []);
+        setTotal(res.total ?? 0);
+      })
+      .catch((e) => {
+        if ((e as Error).name === "AbortError") return;
+        setError((e as Error).message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      });
 
     return () => {
-      window.clearTimeout(timer);
       controller.abort();
     };
-  }, [lang, query]);
+  }, [lang, query, queryCacheKey, searchVersion]);
 
   useEffect(() => {
     let cancelled = false;
@@ -767,7 +827,16 @@ export default function LangHomeClient({ lang }: { lang: Lang }) {
 
   const resetFilters = useCallback(() => {
     setCurrent({ ...defaultFilter });
+    setNameDraft(defaultFilter.name);
+    setSearchVersion((prev) => prev + 1);
   }, []);
+
+  const submitNameSearch = useCallback(() => {
+    const nextName = nameDraft.trim().replace(/\s+/g, " ");
+    setNameDraft(nextName);
+    setCurrent((prev) => ({ ...prev, name: nextName, page: 1 }));
+    setSearchVersion((prev) => prev + 1);
+  }, [nameDraft]);
 
   const openCardDetail = useCallback(
     async (card: CardListItem) => {
@@ -879,15 +948,25 @@ export default function LangHomeClient({ lang }: { lang: Lang }) {
       <SearchPanel
         lang={lang}
         total={total}
-        name={current.name}
-        onNameChange={(value) => updateFilter({ name: value })}
+        nameDraft={nameDraft}
+        onNameChange={setNameDraft}
+        onSearch={submitNameSearch}
         onOpenRandom={() => void openRandomCard()}
         randomLoading={randomLoading}
+        searchDisabled={loading && nameDraft.trim().replace(/\s+/g, " ") === current.name}
       />
 
       <section className="content-area">
         <aside className="desktop-filters">
-          <FilterPanel current={current} filters={filterOptions ?? undefined} onChange={updateFilter} onReset={resetFilters} />
+          <FilterPanel
+            current={current}
+            nameDraft={nameDraft}
+            filters={filterOptions ?? undefined}
+            onChange={updateFilter}
+            onNameChange={setNameDraft}
+            onSearch={submitNameSearch}
+            onReset={resetFilters}
+          />
         </aside>
 
         <div className="results-panel panel">
@@ -919,7 +998,15 @@ export default function LangHomeClient({ lang }: { lang: Lang }) {
               <h2>筛选条件</h2>
               <button onClick={() => setDrawerOpen(false)}>关闭</button>
             </div>
-            <FilterPanel current={current} filters={filterOptions ?? undefined} onChange={updateFilter} onReset={resetFilters} />
+            <FilterPanel
+              current={current}
+              nameDraft={nameDraft}
+              filters={filterOptions ?? undefined}
+              onChange={updateFilter}
+              onNameChange={setNameDraft}
+              onSearch={submitNameSearch}
+              onReset={resetFilters}
+            />
           </div>
         </div>
       ) : null}

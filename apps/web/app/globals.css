@@ -155,6 +155,7 @@ a {
   gap: 10px;
 }
 
+.primary-btn,
 .ghost-btn,
 .docs-link,
 .secondary-btn,
@@ -176,11 +177,29 @@ a {
   transition: transform 0.14s ease, border-color 0.14s ease, background-color 0.14s ease;
 }
 
+.primary-btn {
+  gap: 8px;
+  background: #a11a46;
+  border-color: #a11a46;
+  color: #fff;
+}
+
 .ghost-btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
 
+.primary-btn:disabled,
+.secondary-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.filter-search-btn {
+  width: 100%;
+}
+
+.primary-btn:hover,
 .ghost-btn:hover,
 .docs-link:hover,
 .secondary-btn:hover,
@@ -189,6 +208,11 @@ a {
 .raw-json-actions button:hover {
   border-color: rgba(180, 35, 84, 0.45);
   background: var(--accent-soft);
+}
+
+.primary-btn:hover:not(:disabled) {
+  background: #8b153c;
+  border-color: #8b153c;
 }
 
 .docs-link {
@@ -265,6 +289,10 @@ a {
 
 .status {
   margin: 16px 4px;
+}
+
+.inline-status {
+  margin-top: 0;
 }
 
 .status.error {

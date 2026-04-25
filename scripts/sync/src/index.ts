@@ -240,6 +240,25 @@ const normalizeText = (value: unknown): string =>
     .replace(/\s+/g, " ")
     .toLowerCase();
 
+const buildSearchTerms = (...values: Array<string | undefined>): string[] => {
+  const terms = new Set<string>();
+
+  for (const value of values) {
+    const normalized = normalizeText(value);
+    if (!normalized) continue;
+
+    const chars = Array.from(normalized);
+    for (let start = 0; start < chars.length; start += 1) {
+      for (let end = start + 1; end <= chars.length; end += 1) {
+        const term = chars.slice(start, end).join("").trim();
+        if (term) terms.add(term);
+      }
+    }
+  }
+
+  return [...terms].sort();
+};
+
 const buildLogicalSignature = (card: CardDetail): Record<string, unknown> => {
   const attacks = Array.isArray(card.attacks)
     ? card.attacks.map((attack) => ({
@@ -380,6 +399,16 @@ const ensureSyncTables = async (): Promise<void> => {
     );
     CREATE INDEX IF NOT EXISTS idx_synced_images_lang_card
       ON synced_images(lang, card_id);
+    CREATE INDEX IF NOT EXISTS idx_synced_images_lookup
+      ON synced_images(lang, card_id, quality, ext);
+    CREATE TABLE IF NOT EXISTS card_search_terms (
+      lang TEXT NOT NULL,
+      term TEXT NOT NULL,
+      card_id TEXT NOT NULL,
+      PRIMARY KEY (lang, term, card_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_card_search_terms_card
+      ON card_search_terms(lang, card_id);
   `);
 };
 
@@ -805,6 +834,9 @@ const upsertCards = async (lang: Lang, cards: CardDetail[]): Promise<void> => {
     statements.push(
       `DELETE FROM card_types WHERE lang = ${sqlString(lang)} AND card_id = ${sqlString(id)};`
     );
+    statements.push(
+      `DELETE FROM card_search_terms WHERE lang = ${sqlString(lang)} AND card_id = ${sqlString(id)};`
+    );
 
     statements.push(`
 INSERT OR REPLACE INTO cards (
@@ -840,6 +872,14 @@ VALUES(${sqlString(lang)}, ${sqlString(id)}, ${sqlString(sourceHash)}, CURRENT_T
         `INSERT OR REPLACE INTO card_types(lang, card_id, type) VALUES(${sqlString(lang)}, ${sqlString(
           id
         )}, ${sqlString(type)});`
+      );
+    }
+
+    for (const term of buildSearchTerms(card.name ?? id, toSearchNameZhCn(lang, card.name ?? id))) {
+      statements.push(
+        `INSERT OR REPLACE INTO card_search_terms(lang, term, card_id) VALUES(${sqlString(lang)}, ${sqlString(
+          term
+        )}, ${sqlString(id)});`
       );
     }
 
